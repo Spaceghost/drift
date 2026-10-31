@@ -25,6 +25,7 @@ jobs:
           update: true
           install: >-
             make
+            diffutils
             mingw-w64-ucrt-x86_64-gcc
       - shell: msys2 {0}
         run: make linux-check CC=gcc
