@@ -1,0 +1,17 @@
+DRIFT_LINUX_GUEST Linux 6.12.107+deb13-amd64 x86_64
+clocksource=tsc; pcspkr module absent; no module loader or other userspace service
+Linux pcspkr import: lifecycle, PIT transcript, errors, reentry and concurrency passed
+Windows Moufiltr: 584 checks passed (actual source, nested/pending requests, callbacks, ownership and failures)
+DRIFT_LINUX_GUEST_BOTH_SOURCE_MODELS_PASS
+DRIFT_LINUX_KERNEL_IOPERM_DENIAL_PASS
+PIO_SAMPLE	1	reference	100231	200	500	200	500	90261c7c4b9d54bd
+PIO_SAMPLE	1	import	96857	200	500	200	500	90261c7c4b9d54bd
+PIO_SAMPLE	2	import	99733	200	500	200	500	90261c7c4b9d54bd
+PIO_SAMPLE	2	reference	100637	200	500	200	500	90261c7c4b9d54bd
+PIO_SAMPLE	3	reference	103827	200	500	200	500	90261c7c4b9d54bd
+PIO_SAMPLE	3	import	105269	200	500	200	500	90261c7c4b9d54bd
+PIO_SAMPLE	4	import	96672	200	500	200	500	90261c7c4b9d54bd
+PIO_SAMPLE	4	reference	98413	200	500	200	500	90261c7c4b9d54bd
+DRIFT_LINUX_REAL_PIO_PASS
+DRIFT_LINUX_GUEST_EXIT=0
+[    3.844612] reboot: Power down

@@ -1,0 +1,20 @@
+{
+  "cc_version": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "flags": [
+    "-m32",
+    "-std=c11",
+    "-Os",
+    "-fno-strict-aliasing",
+    "-fno-stack-protector",
+    "-fno-pie",
+    "-D__minix",
+    "--sysroot=/home/runner/work/drift/drift/build/qualification-minix/sdk",
+    "-isystem",
+    "/home/runner/work/drift/drift/build/qualification-minix/sdk/usr/include"
+  ],
+  "pio_source_sha256": "5909088ede9b5c33a3071e6b4e8d0b193bddde734bba6ca1fda9cbe0803b5064",
+  "linux_model_source_sha256": "29f8b11fa8aed9d83dbb45b50a3ad4b37a4ef4cf02db64cedb1cfe3e75be63b6",
+  "windows_model_source_sha256": "09c52d8da73ca6272ceedbe1df3de001e5a4a7acfa920e907f28720dfc4cc678",
+  "linux_upstream_sha256": "a73cf08b1543da44b905957ee35b92ddf5d55a4c283da98d24556636e121d492",
+  "windows_upstream_sha256": "efb2a2c5b7eefa3ea6a30d72e46e72df1ecd4386350e8f07550760319e0621fe"
+}

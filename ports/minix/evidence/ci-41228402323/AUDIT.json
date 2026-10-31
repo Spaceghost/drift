@@ -1,0 +1,17 @@
+{
+  "source_head": "d9cbb4411c3378b96acc33fbf27cabb625419149",
+  "artifact_id": 13053285436,
+  "zip_sha256": "9c6bfaa7ea42e86ecf15cf11ad32db45384dd8644f62bb9e3f0d4c7d7e89e282",
+  "original_members": 20,
+  "result": "passed",
+  "guest_elapsed_seconds": 26.204122004999988,
+  "shared_model_medians_us": {
+    "imported-linux": 633333.0,
+    "direct-reference": 400000.0
+  },
+  "pio_medians_us_per_10000": {
+    "drift": 750000.0,
+    "reference": 716667.0
+  },
+  "independent_audit": "ZIP digest, source hashes, base image, exact guest markers, all7checks, 8realPIO+8sharedmodel raw/result rows, denial and teardown verified"
+}

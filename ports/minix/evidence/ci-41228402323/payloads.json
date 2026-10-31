@@ -1,0 +1,18 @@
+{
+  "linux": {
+    "sha256": "0f7e4b19f7d65f2bb5b8f2c3e4afb7ee1fa6c97e1a71fb2d0d94cc4324e69e82",
+    "bytes": 218200
+  },
+  "windows": {
+    "sha256": "c2170436a35f66cee9f787941d117d2efdb85dac869e4ac7c3992b77bea5c861",
+    "bytes": 224920
+  },
+  "pio": {
+    "sha256": "203bfa90a19b21783b850312edd3a016e92656e8b96cbb493b513937729ae44b",
+    "bytes": 239328
+  },
+  "shared_model": {
+    "sha256": "1256a91386b3443de4f8870746325186619e5a8f3618a1cff89698a84aa40711",
+    "bytes": 217040
+  }
+}

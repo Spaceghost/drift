@@ -1,0 +1,14 @@
+MINGW64_NT-10.0-26100 runnervmdaln5 3.6.12-50c44b7c.x86_64 2026-10-30 16:46 UTC x86_64 Msys
+gcc.exe (Rev6, Built by MSYS2 project) 16.2.0
+Copyright (C) 2026 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+x86_64-w64-mingw32
+
+build/bench-linux-import.exe:     file format pei-x86-64
+architecture: i386:x86-64, flags 0x00000133:
+HAS_RELOC, EXEC_P, HAS_SYMS, HAS_LOCALS, D_PAGED
+start address 0x0000000140001490
+
+CFLAGS=-Os; component-model-no-hardware

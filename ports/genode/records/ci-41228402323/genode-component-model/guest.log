@@ -1,0 +1,32 @@
+qemu-system-x86_64: warning: TCG doesn't support requested feature: CPUID.01H:ECX.pcid [bit 17]
+qemu-system-x86_64: warning: TCG doesn't support requested feature: CPUID.01H:ECX.x2apic [bit 21]
+qemu-system-x86_64: warning: TCG doesn't support requested feature: CPUID.01H:ECX.tsc-deadline [bit 24]
+qemu-system-x86_64: warning: TCG doesn't support requested feature: CPUID.07H:EBX.hle [bit 4]
+qemu-system-x86_64: warning: TCG doesn't support requested feature: CPUID.07H:EBX.invpcid [bit 10]
+qemu-system-x86_64: warning: TCG doesn't support requested feature: CPUID.07H:EBX.rtm [bit 11]
+qemu-system-x86_64: warning: TCG doesn't support requested feature: CPUID.0DH:EAX.xsavec [bit 1]
+
+Bender Version 0.9-beta7-51-g28ba2ad-dirty
+Patching BDA with I/O port 0x3f8.
+Bender: Hello World.
+Need 00370000 bytes to relocate modules.
+Relocating to 1fc6f000: 
+Copying 3601344 bytes...
+
+Cpu apic_id=0x0 [0:0:0:0:0:0] 
+
+
+kernel initialized
+Genode 26.08
+498 MiB RAM and 64536 caps assigned to init
+[init -> test-linux-component] scope=component-model-no-hardware hardware_access=none modeled_waits=no-sleep optimization=-Os
+[init -> test-linux-component] DRIFT_GENODE_COMPONENT sample=1 round=1 position=1 variant=direct-reference elapsed_us=261004 events=500000 operations=3500000 checksum=0x64f59f6df89549d1 control=0xa8 modeled_delay_us=1093750
+[init -> test-linux-component] DRIFT_GENODE_COMPONENT sample=2 round=1 position=2 variant=imported-linux elapsed_us=587125 events=500000 operations=3500000 checksum=0x64f59f6df89549d1 control=0xa8 modeled_delay_us=1093750
+[init -> test-linux-component] DRIFT_GENODE_COMPONENT sample=3 round=2 position=1 variant=imported-linux elapsed_us=601791 events=500000 operations=3500000 checksum=0x64f59f6df89549d1 control=0xa8 modeled_delay_us=1093750
+[init -> test-linux-component] DRIFT_GENODE_COMPONENT sample=4 round=2 position=2 variant=direct-reference elapsed_us=259494 events=500000 operations=3500000 checksum=0x64f59f6df89549d1 control=0xa8 modeled_delay_us=1093750
+[init -> test-linux-component] DRIFT_GENODE_COMPONENT sample=5 round=3 position=1 variant=direct-reference elapsed_us=259042 events=500000 operations=3500000 checksum=0x64f59f6df89549d1 control=0xa8 modeled_delay_us=1093750
+[init -> test-linux-component] DRIFT_GENODE_COMPONENT sample=6 round=3 position=2 variant=imported-linux elapsed_us=588604 events=500000 operations=3500000 checksum=0x64f59f6df89549d1 control=0xa8 modeled_delay_us=1093750
+[init -> test-linux-component] DRIFT_GENODE_COMPONENT sample=7 round=4 position=1 variant=imported-linux elapsed_us=584934 events=500000 operations=3500000 checksum=0x64f59f6df89549d1 control=0xa8 modeled_delay_us=1093750
+[init -> test-linux-component] DRIFT_GENODE_COMPONENT sample=8 round=4 position=2 variant=direct-reference elapsed_us=258862 events=500000 operations=3500000 checksum=0x64f59f6df89549d1 control=0xa8 modeled_delay_us=1093750
+[init -> test-linux-component] Drift Genode shared Linux component MODEL PASS
+qemu-system-x86_64: terminating on signal 15 from pid 6259 (python3)

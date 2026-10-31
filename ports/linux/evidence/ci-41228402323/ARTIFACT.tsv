@@ -1,0 +1,10 @@
+key	value
+repository	Spaceghost/drift
+source_head	d9cbb4411c3378b96acc33fbf27cabb625419149
+workflow_run	41228402323
+job	124617281456
+artifact_id	13053000996
+artifact_zip_sha256	0d4f41ababd345e3343c1e59f1fd107c27ef71da39639e33f550376d43a1ece6
+original_members	8
+result_scope	fresh Linux guest; two source models and actual authorized PIT2 I/O
+qemu_exit	0

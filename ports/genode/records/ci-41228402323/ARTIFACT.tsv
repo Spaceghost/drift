@@ -1,0 +1,10 @@
+key	value
+workflow_run	41228402323
+job_id	124617281564
+source_head	d9cbb4411c3378b96acc33fbf27cabb625419149
+artifact_name	guest-genode
+artifact_id	13052179320
+artifact_zip_sha256	455dccac4bb97c8a8d08cf8cd00f89599334bd693c1fcf122c67a3c61682d056
+artifact_zip_bytes	28983
+original_members	15
+original_uncompressed_bytes	394886

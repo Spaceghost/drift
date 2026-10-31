@@ -1,0 +1,11 @@
+$ make -B -C /home/runner/work/drift/drift/imports/windows/moufiltr library BUILD=/home/runner/work/drift/drift/build/qualification-linux/windows-objects CC=cc CFLAGS=-Os
+make: Entering directory '/home/runner/work/drift/drift/imports/windows/moufiltr'
+sha256sum -c SHA256SUMS
+upstream/moufiltr.c: OK
+upstream/moufiltr.h: OK
+upstream/LICENSE.MS-PL: OK
+mkdir -p "/home/runner/work/drift/drift/build/qualification-linux/windows-objects"
+cc -I. -Icompat -std=c11 -Wall -Wextra -Werror -Wno-unknown-pragmas -Os -ffreestanding -fno-builtin -fno-stack-protector -fno-strict-aliasing -c compat.generated.c -o /home/runner/work/drift/drift/build/qualification-linux/windows-objects/compat.o
+cc -I. -Icompat -std=c11 -Wall -Wextra -Werror -Wno-unknown-pragmas -Os -ffreestanding -fno-builtin -fno-stack-protector -fno-strict-aliasing -c driver.c -o /home/runner/work/drift/drift/build/qualification-linux/windows-objects/driver.o
+ar rcs /home/runner/work/drift/drift/build/qualification-linux/windows-objects/libdrift-windows-moufiltr.a /home/runner/work/drift/drift/build/qualification-linux/windows-objects/compat.o /home/runner/work/drift/drift/build/qualification-linux/windows-objects/driver.o
+make: Leaving directory '/home/runner/work/drift/drift/imports/windows/moufiltr'

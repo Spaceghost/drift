@@ -1,0 +1,18 @@
+{
+  "source_head": "d9cbb4411c3378b96acc33fbf27cabb625419149",
+  "sdk_source_commit": "d18ee9e917200b059549e21f2dd9a55bfe61a0eb",
+  "sdk_tree_sha256": "d520090fc4798c75fa38f7f34cd69dafbcfe2069929e6968b59da588fec42078",
+  "verified_source_files": 40,
+  "PIO_rows": 8,
+  "model_rows": 8,
+  "denial_verified": true,
+  "PIO_median_us_per_400_rpc": {
+    "import": 281917.0,
+    "reference": 273866.5
+  },
+  "model_median_us_per_500000_events": {
+    "imported-linux": 587864.5,
+    "direct-reference": 259268.0
+  },
+  "all_checks_pass": true
+}

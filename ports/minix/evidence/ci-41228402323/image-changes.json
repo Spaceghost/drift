@@ -1,0 +1,41 @@
+{
+  "base_sha256": "389be8cbc2b74022671c082d0b88511b17e63b18003a14647b03331e3467b4c4",
+  "test_sha256": "9aa164d65b6f9c970205d55f3ff0f750b7cc98604a132091b67dfc962b47ecf9",
+  "changes": [
+    {
+      "path": "/bin/calendar",
+      "partition_sector": 82088,
+      "old_sha256": "911f115f7ba224fc0fab12e6f240d3c6b35a17cc0813b5a1fd192261107df6e8",
+      "payload_sha256": "0f7e4b19f7d65f2bb5b8f2c3e4afb7ee1fa6c97e1a71fb2d0d94cc4324e69e82",
+      "kept_file_size": true
+    },
+    {
+      "path": "/bin/cal",
+      "partition_sector": 82088,
+      "old_sha256": "f627e12a19f770758b0da84569e5e398da6ba1f6f62250dba162fa3877426172",
+      "payload_sha256": "c2170436a35f66cee9f787941d117d2efdb85dac869e4ac7c3992b77bea5c861",
+      "kept_file_size": true
+    },
+    {
+      "path": "/bin/fetch",
+      "partition_sector": 82088,
+      "old_sha256": "65c681f4d8ed4dbb8c79fa3df64822cf00e3f81737fdaa160a2a2d63e3e50800",
+      "payload_sha256": "203bfa90a19b21783b850312edd3a016e92656e8b96cbb493b513937729ae44b",
+      "kept_file_size": true
+    },
+    {
+      "path": "/bin/csplit",
+      "partition_sector": 82088,
+      "old_sha256": "e84e46bd01ade28baf76874c867a348169d4fe7140236107acf780dee8259d96",
+      "payload_sha256": "1256a91386b3443de4f8870746325186619e5a8f3618a1cff89698a84aa40711",
+      "kept_file_size": true
+    },
+    {
+      "path": "/etc/rc.cd",
+      "partition_sector": 12288,
+      "old_sha256": "42b58b14d5b85c70ec77c7a4717908e450348cb0507d351325dcf074baf37b74",
+      "payload_sha256": "5ea2bac5166545d66437435a89b69b368b0eef54fb90382d7cd1840ef24dd927",
+      "kept_file_size": false
+    }
+  ]
+}

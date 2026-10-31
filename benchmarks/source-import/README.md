@@ -7,6 +7,15 @@ Linux compatibility; the second is not complete WDF/NDIS/StorPort or a `.sys`
 loader. [Target selection and qualification](../../docs/compatibility.md)
 separates implemented profiles from the network/storage work still pending.
 
+Latest complete qualification is source commit `d9cbb4411c3378b96acc33fbf27cabb625419149`:
+both [native host jobs](https://github.com/Spaceghost/drift/actions/runs/41228402217)
+and all three [real guest jobs](https://github.com/Spaceghost/drift/actions/runs/41228402323)
+are green. Fresh CI archives are independently checked and retained for
+[hosts](hosts/ci-41228402217), [Linux](../../ports/linux/evidence/ci-41228402323),
+[MINIX](../../ports/minix/evidence/ci-41228402323) and
+[Genode](../../ports/genode/records/ci-41228402323). They remain separate from
+the earlier canonical measurement tables below; runner variation is not pooled.
+
 ## What actually executed
 
 | OS | Verified execution | Limit |

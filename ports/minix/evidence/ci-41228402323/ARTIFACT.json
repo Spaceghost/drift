@@ -1,0 +1,14 @@
+{
+  "repository": "Spaceghost/drift",
+  "workflow_run": 41228402323,
+  "job_id": 124617281533,
+  "job_name": "linux-minix (minix)",
+  "conclusion": "success",
+  "source_head": "d9cbb4411c3378b96acc33fbf27cabb625419149",
+  "artifact_id": 13053285436,
+  "artifact_name": "guest-minix",
+  "zip_bytes": 52633,
+  "zip_sha256": "9c6bfaa7ea42e86ecf15cf11ad32db45384dd8644f62bb9e3f0d4c7d7e89e282",
+  "original_members": 20,
+  "artifact_url": "https://github.com/Spaceghost/drift/actions/runs/41228402323/artifacts/13053285436"
+}

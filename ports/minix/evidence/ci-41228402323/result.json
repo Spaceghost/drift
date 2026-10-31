@@ -1,0 +1,201 @@
+{
+  "status": "passed",
+  "checks": {
+    "shared_model": true,
+    "linux_model": true,
+    "windows_model": true,
+    "pio": true,
+    "tty_ownership": true,
+    "denial": true,
+    "benchmarks": true
+  },
+  "benchmarks": [
+    {
+      "kind": "drift",
+      "round": 1,
+      "events": 10000,
+      "elapsed_us": 750000,
+      "reads": 10000,
+      "writes": 40000,
+      "waits": 40000,
+      "trace": 2932125812
+    },
+    {
+      "kind": "reference",
+      "round": 1,
+      "events": 10000,
+      "elapsed_us": 716666,
+      "reads": 10000,
+      "writes": 40000,
+      "waits": 40000,
+      "trace": 2932125812
+    },
+    {
+      "kind": "reference",
+      "round": 2,
+      "events": 10000,
+      "elapsed_us": 716667,
+      "reads": 10000,
+      "writes": 40000,
+      "waits": 40000,
+      "trace": 2932125812
+    },
+    {
+      "kind": "drift",
+      "round": 2,
+      "events": 10000,
+      "elapsed_us": 750000,
+      "reads": 10000,
+      "writes": 40000,
+      "waits": 40000,
+      "trace": 2932125812
+    },
+    {
+      "kind": "drift",
+      "round": 3,
+      "events": 10000,
+      "elapsed_us": 766667,
+      "reads": 10000,
+      "writes": 40000,
+      "waits": 40000,
+      "trace": 2932125812
+    },
+    {
+      "kind": "reference",
+      "round": 3,
+      "events": 10000,
+      "elapsed_us": 716667,
+      "reads": 10000,
+      "writes": 40000,
+      "waits": 40000,
+      "trace": 2932125812
+    },
+    {
+      "kind": "reference",
+      "round": 4,
+      "events": 10000,
+      "elapsed_us": 716667,
+      "reads": 10000,
+      "writes": 40000,
+      "waits": 40000,
+      "trace": 2932125812
+    },
+    {
+      "kind": "drift",
+      "round": 4,
+      "events": 10000,
+      "elapsed_us": 733333,
+      "reads": 10000,
+      "writes": 40000,
+      "waits": 40000,
+      "trace": 2932125812
+    }
+  ],
+  "shared_model_rows": [
+    [
+      "1",
+      "1",
+      "1",
+      "direct-reference",
+      "400000",
+      "500000",
+      "3500000",
+      "64f59f6df89549d1",
+      "a8",
+      "1093750"
+    ],
+    [
+      "2",
+      "1",
+      "2",
+      "imported-linux",
+      "633334",
+      "500000",
+      "3500000",
+      "64f59f6df89549d1",
+      "a8",
+      "1093750"
+    ],
+    [
+      "3",
+      "2",
+      "1",
+      "imported-linux",
+      "633333",
+      "500000",
+      "3500000",
+      "64f59f6df89549d1",
+      "a8",
+      "1093750"
+    ],
+    [
+      "4",
+      "2",
+      "2",
+      "direct-reference",
+      "400000",
+      "500000",
+      "3500000",
+      "64f59f6df89549d1",
+      "a8",
+      "1093750"
+    ],
+    [
+      "5",
+      "3",
+      "1",
+      "direct-reference",
+      "400000",
+      "500000",
+      "3500000",
+      "64f59f6df89549d1",
+      "a8",
+      "1093750"
+    ],
+    [
+      "6",
+      "3",
+      "2",
+      "imported-linux",
+      "633333",
+      "500000",
+      "3500000",
+      "64f59f6df89549d1",
+      "a8",
+      "1093750"
+    ],
+    [
+      "7",
+      "4",
+      "1",
+      "imported-linux",
+      "616667",
+      "500000",
+      "3500000",
+      "64f59f6df89549d1",
+      "a8",
+      "1093750"
+    ],
+    [
+      "8",
+      "4",
+      "2",
+      "direct-reference",
+      "400000",
+      "500000",
+      "3500000",
+      "64f59f6df89549d1",
+      "a8",
+      "1093750"
+    ]
+  ],
+  "elapsed_seconds": 26.204122004999988,
+  "serial_sha256": "0229ed9b85884e1cf370d32d7bce0cdd78d8a4ffb02659dc21fab627eceb86bf",
+  "scopes": {
+    "shared_model": "same 500k-event monotonic-wall component fixture as other OSes; modeled ports and waits, not hardware",
+    "linux_model": "actual MINIX userspace; modeled ports; pthread contention omitted",
+    "windows_model": "actual MINIX userspace; modeled WDF; separate MS-PL executable, no Windows kernel ABI",
+    "pio": "actual MINIX RS service, checked port I/O, native mutex and delay, emulated PIT2 readback; no physical speaker qualification"
+  },
+  "benchmark_scope": "TCG component I/O loops in one service; not OS request latency, physical hardware speed or a cross-host ranking"
+}

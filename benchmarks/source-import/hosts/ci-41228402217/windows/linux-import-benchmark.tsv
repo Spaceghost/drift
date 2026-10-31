@@ -1,0 +1,11 @@
+# scope=component-model-no-hardware
+# monotonic wall microseconds; modeled waits do not sleep; no native-kernel or hardware timing
+sample	round	position	variant	elapsed_us	events	operations	checksum	control	modeled_delay_us
+1	1	1	direct-reference	9794	500000	3500000	64f59f6df89549d1	a8	1093750
+2	1	2	imported-linux	22787	500000	3500000	64f59f6df89549d1	a8	1093750
+3	2	1	imported-linux	22876	500000	3500000	64f59f6df89549d1	a8	1093750
+4	2	2	direct-reference	10110	500000	3500000	64f59f6df89549d1	a8	1093750
+5	3	1	direct-reference	9990	500000	3500000	64f59f6df89549d1	a8	1093750
+6	3	2	imported-linux	23467	500000	3500000	64f59f6df89549d1	a8	1093750
+7	4	1	imported-linux	22853	500000	3500000	64f59f6df89549d1	a8	1093750
+8	4	2	direct-reference	8951	500000	3500000	64f59f6df89549d1	a8	1093750

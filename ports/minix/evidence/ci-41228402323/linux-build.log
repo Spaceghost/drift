@@ -1,0 +1,8 @@
+make: Entering directory '/home/runner/work/drift/drift/imports/linux/pcspkr'
+sha256sum -c SHA256SUMS
+upstream/pcspkr.c: OK
+upstream/COPYING.GPL-2.0: OK
+cc -m32 -std=c11 -Os -fno-strict-aliasing -fno-stack-protector -fno-pie -D__minix --sysroot=/home/runner/work/drift/drift/build/qualification-minix/sdk -isystem /home/runner/work/drift/drift/build/qualification-minix/sdk/usr/include -std=c11 -Wall -Wextra -Werror -Os -ffreestanding -fno-builtin -fno-stack-protector -fno-strict-aliasing -I. -Icompat -c compat.generated.c -o /home/runner/work/drift/drift/build/qualification-minix/linux-objects/compat.o
+cc -m32 -std=c11 -Os -fno-strict-aliasing -fno-stack-protector -fno-pie -D__minix --sysroot=/home/runner/work/drift/drift/build/qualification-minix/sdk -isystem /home/runner/work/drift/drift/build/qualification-minix/sdk/usr/include -std=c11 -Wall -Wextra -Werror -Wno-unused-parameter -Os -ffreestanding -fno-builtin -fno-stack-protector -fno-strict-aliasing -I. -Icompat -c driver.c -o /home/runner/work/drift/drift/build/qualification-minix/linux-objects/driver.o
+ar rcs /home/runner/work/drift/drift/build/qualification-minix/linux-objects/libdrift-linux-pcspkr.a /home/runner/work/drift/drift/build/qualification-minix/linux-objects/compat.o /home/runner/work/drift/drift/build/qualification-minix/linux-objects/driver.o
+make: Leaving directory '/home/runner/work/drift/drift/imports/linux/pcspkr'

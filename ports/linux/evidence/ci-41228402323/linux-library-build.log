@@ -1,0 +1,10 @@
+$ make -B -C /home/runner/work/drift/drift/imports/linux/pcspkr library BUILD=/home/runner/work/drift/drift/build/qualification-linux/linux-objects CC=cc CFLAGS=-Os
+make: Entering directory '/home/runner/work/drift/drift/imports/linux/pcspkr'
+sha256sum -c SHA256SUMS
+upstream/pcspkr.c: OK
+upstream/COPYING.GPL-2.0: OK
+mkdir -p /home/runner/work/drift/drift/build/qualification-linux/linux-objects
+cc -std=c11 -Wall -Wextra -Werror -Os -ffreestanding -fno-builtin -fno-stack-protector -fno-strict-aliasing -I. -Icompat -c compat.generated.c -o /home/runner/work/drift/drift/build/qualification-linux/linux-objects/compat.o
+cc -std=c11 -Wall -Wextra -Werror -Wno-unused-parameter -Os -ffreestanding -fno-builtin -fno-stack-protector -fno-strict-aliasing -I. -Icompat -c driver.c -o /home/runner/work/drift/drift/build/qualification-linux/linux-objects/driver.o
+ar rcs /home/runner/work/drift/drift/build/qualification-linux/linux-objects/libdrift-linux-pcspkr.a /home/runner/work/drift/drift/build/qualification-linux/linux-objects/compat.o /home/runner/work/drift/drift/build/qualification-linux/linux-objects/driver.o
+make: Leaving directory '/home/runner/work/drift/drift/imports/linux/pcspkr'
