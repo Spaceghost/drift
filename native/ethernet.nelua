@@ -1,0 +1,231 @@
+-- Intel 82540EM and RTL8139 polling Ethernet. SPDX-License-Identifier: MIT
+## pragmas.nogc = true
+## pragmas.noentrypoint = true
+## pragmas.nochecks = true
+## pragmas.nocstaticassert = true
+## pragmas.unitname = 'drift_ethernet'
+local hw = require 'drift.hw'
+local Net: type <cimport 'drift_ethernet', cinclude '"drift_ethernet.h"'> = @record{
+  hw: *hw.Bus, rx_ring: hw.DMA, tx_ring: hw.DMA, rx_data: hw.DMA, tx_data: hw.DMA,
+  region: uint32, kind: uint32, rx_next: uint32, tx_next: uint32, timeout_us: uint32,
+  state: int32, mac: [6]uint8
+}
+local function read(d: *Net, off: uint32, width: uint32): uint32
+  return uint32(hw.read(d.hw,d.region,off,width))
+end
+local function write(d: *Net, off: uint32, width: uint32, value: uint32)
+  hw.write(d.hw,d.region,off,width,value)
+end
+local function get16(p: *[0]uint8, at: uint32): uint32
+  return uint32(p[at]) | uint32(p[at+1])<<8
+end
+local function put16(p: *[0]uint8, at: uint32, value: uint32)
+  p[at],p[at+1] = uint8(value&255),uint8((value>>8)&255)
+end
+local function put64(p: *[0]uint8, at: uint32, value: uint64)
+  for i: uint32=0,7 do p[at+i]=uint8((value>>(i*8))&255) end
+end
+local function clear(buffer: *hw.DMA)
+  for i: uint32=0,<buffer.size do buffer.data[i]=0 end
+end
+local function expired(d: *Net, start: uint64): boolean
+  return hw.time(d.hw)-start >= d.timeout_us
+end
+local function reset(d: *Net): int32
+  local start=hw.time(d.hw)
+  if d.kind == 1 then
+    write(d,0x00d8,4,0xffffffff) -- mask interrupts
+    write(d,0x0100,4,0)        -- stop reception
+    write(d,0x0400,4,0)        -- stop transmission
+    write(d,0,4,read(d,0,4)|0x04000000)
+    while (read(d,0,4)&0x04000000) ~= 0 do
+      if expired(d,start) then d.state=-1; return -4 end
+      hw.wait(d.hw,10)
+    end
+    hw.wait(d.hw,1000)         -- reset/NVM reload settling
+    write(d,0x00d8,4,0xffffffff)
+  else
+    write(d,0x3c,2,0)
+    write(d,0x37,1,0x10)
+    while (read(d,0x37,1)&0x10) ~= 0 do
+      if expired(d,start) then d.state=-1; return -4 end
+      hw.wait(d.hw,10)
+    end
+  end
+  return 0
+end
+local function free_buffers(d: *Net)
+  if d.rx_ring.data ~= nilptr then hw.release(d.hw,&d.rx_ring) end
+  if d.tx_ring.data ~= nilptr then hw.release(d.hw,&d.tx_ring) end
+  if d.rx_data.data ~= nilptr then hw.release(d.hw,&d.rx_data) end
+  if d.tx_data.data ~= nilptr then hw.release(d.hw,&d.tx_data) end
+  d.rx_ring,d.tx_ring,d.rx_data,d.tx_data=(@hw.DMA){},(@hw.DMA){},(@hw.DMA){},(@hw.DMA){}
+end
+local function allocate(d: *Net, b: *hw.DMA, size: uint32, alignment: uint32): boolean
+  if hw.alloc(d.hw,size,alignment,b) ~= 0 then return false end
+  if b.data == nilptr or b.size < size or (b.address & (alignment-1)) ~= 0 or
+     b.address > 0xffffffffffffffff_u64-size then return false end
+  if d.kind == 2 and b.address+size > 0x100000000_u64 then return false end
+  clear(b)
+  return true
+end
+local function drift_eth_init(d: *Net, bus: *hw.Bus, region: uint32, kind: uint32,
+                              timeout_us: uint32): int32 <cexport, codename 'drift_eth_init'>
+  if d == nilptr or hw.valid(bus) == 0 or timeout_us == 0 then return -1 end
+  if kind ~= 1 and kind ~= 2 then return -7 end
+  if d.state ~= 0 or d.rx_ring.data ~= nilptr or d.tx_ring.data ~= nilptr or
+     d.rx_data.data ~= nilptr or d.tx_data.data ~= nilptr then return -2 end
+  d.hw,d.region,d.kind,d.timeout_us=bus,region,kind,timeout_us
+  d.rx_next,d.tx_next,d.state=0,0,2
+  if reset(d) ~= 0 then return -4 end
+  if kind == 1 then
+    if not allocate(d,&d.rx_ring,256,128) or not allocate(d,&d.tx_ring,256,128) or
+       not allocate(d,&d.rx_data,32768,2048) or not allocate(d,&d.tx_data,2048,16) then
+      free_buffers(d); d.state=0; return -3
+    end
+    local low,high=read(d,0x5400,4),read(d,0x5404,4)
+    for i: uint32=0,3 do d.mac[i]=uint8((low>>(i*8))&255) end
+    d.mac[4],d.mac[5]=uint8(high&255),uint8((high>>8)&255)
+    for i: uint32=0,15 do
+      put64(d.rx_ring.data,i*16,d.rx_data.address+uint64(i)*2048)
+      d.tx_ring.data[i*16+12]=1
+    end
+    hw.sync(d.hw,&d.rx_data,0,32768,3)
+    hw.sync(d.hw,&d.rx_ring,0,256,3)
+    hw.sync(d.hw,&d.tx_ring,0,256,3)
+    write(d,0,4,read(d,0,4)|0x40) -- set link up; PHY handles negotiation
+    for i: uint32=0,127 do write(d,0x5200+i*4,4,0) end
+    write(d,0x5404,4,high|0x80000000)
+    write(d,0x2800,4,uint32(d.rx_ring.address&0xffffffff))
+    write(d,0x2804,4,uint32(d.rx_ring.address>>32))
+    write(d,0x2808,4,256); write(d,0x2810,4,0); write(d,0x2818,4,15)
+    write(d,0x3800,4,uint32(d.tx_ring.address&0xffffffff))
+    write(d,0x3804,4,uint32(d.tx_ring.address>>32))
+    write(d,0x3808,4,256); write(d,0x3810,4,0); write(d,0x3818,4,0)
+    write(d,0x0410,4,0x0060200a)
+    write(d,0x0400,4,0x000400fa) -- EN, pad short, CT=15, COLD=64
+    write(d,0x0100,4,0x04008002) -- EN, broadcast, strip FCS; 2048-byte buffers
+  else
+    if not allocate(d,&d.rx_data,10256,256) or not allocate(d,&d.tx_data,8192,256) then
+      free_buffers(d); d.state=0; return -3
+    end
+    for i: uint32=0,5 do d.mac[i]=uint8(read(d,i,1)) end
+    hw.sync(d.hw,&d.rx_data,0,10256,3)
+    write(d,0x52,1,0) -- awake
+    write(d,0x30,4,uint32(d.rx_data.address))
+    for i: uint32=0,3 do write(d,0x20+i*4,4,uint32(d.tx_data.address+uint64(i)*2048)) end
+    write(d,0x38,2,0xfff0)
+    write(d,0x3e,2,0xffff)
+    write(d,0x37,1,0x0c)
+    write(d,0x40,4,0x03000700) -- IFG96, unlimited DMA burst
+    write(d,0x08,4,0xffffffff); write(d,0x0c,4,0xffffffff)
+    write(d,0x44,4,0x0000078e) -- 8KiB ring, overflow tail, own/multicast/broadcast
+  end
+  d.state=1
+  return 0
+end
+local function drift_eth_close(d: *Net): int32 <cexport, codename 'drift_eth_close'>
+  if d == nilptr then return -1 end
+  if d.state == 0 then return 0 end
+  if hw.valid(d.hw) == 0 then return -1 end
+  if reset(d) ~= 0 then return -4 end
+  free_buffers(d); d.state=0
+  return 0
+end
+local function stop_fault(d: *Net, error: int32): int32
+  -- Stop before any allocation can be reused; a failed reset quarantines DMA.
+  reset(d)
+  d.state=-1
+  return error
+end
+local function drift_eth_tx(d: *Net, frame: *[0]uint8, length: uint32): int32
+                            <cexport, codename 'drift_eth_tx'>
+  if d == nilptr or frame == nilptr or length < 14 or length > 1518 then return -1 end
+  if d.state ~= 1 then return -2 end
+  local send=length
+  if send < 60 then send=60 end
+  local slot=d.tx_next
+  local at: uint32=0
+  if d.kind == 2 then at=slot*2048 end
+  for i: uint32=0,<send do
+    if i < length then d.tx_data.data[at+i]=frame[i] else d.tx_data.data[at+i]=0 end
+  end
+  hw.sync(d.hw,&d.tx_data,at,send,1)
+  if d.kind == 1 then
+    local desc=slot*16
+    put64(d.tx_ring.data,desc,d.tx_data.address)
+    for i: uint32=8,15 do d.tx_ring.data[desc+i]=0 end
+    put16(d.tx_ring.data,desc+8,send)
+    d.tx_ring.data[desc+11]=0x0b -- EOP, IFCS, RS
+    hw.sync(d.hw,&d.tx_ring,desc,16,1)
+    write(d,0x3818,4,(slot+1)&15)
+    local start=hw.time(d.hw)
+    while true do
+      hw.sync(d.hw,&d.tx_ring,desc,16,2)
+      if (d.tx_ring.data[desc+12]&1) ~= 0 then break end
+      if expired(d,start) then return stop_fault(d,-4) end
+      hw.wait(d.hw,10)
+    end
+    if (d.tx_ring.data[desc+12]&0x0e) ~= 0 then return stop_fault(d,-5) end
+    d.tx_next=(slot+1)&15
+  else
+    write(d,0x10+slot*4,4,send)
+    local start=hw.time(d.hw)
+    while true do
+      local status=read(d,0x10+slot*4,4)
+      if (status&0xc0004000) ~= 0 then return stop_fault(d,-5) end
+      if (status&0x8000) ~= 0 then break end
+      if expired(d,start) then return stop_fault(d,-4) end
+      hw.wait(d.hw,10)
+    end
+    d.tx_next=(slot+1)&3
+  end
+  return 0
+end
+local function recycle(d: *Net)
+  local desc=d.rx_next*16
+  put64(d.rx_ring.data,desc,d.rx_data.address+uint64(d.rx_next)*2048)
+  for i: uint32=8,15 do d.rx_ring.data[desc+i]=0 end
+  hw.sync(d.hw,&d.rx_ring,desc,16,1)
+  write(d,0x2818,4,d.rx_next)
+  d.rx_next=(d.rx_next+1)&15
+end
+local function drift_eth_rx(d: *Net, frame: *[0]uint8, capacity: uint32, length: *[0]uint32): int32
+                            <cexport, codename 'drift_eth_rx'>
+  if d == nilptr or frame == nilptr or length == nilptr then return -1 end
+  length[0]=0
+  if d.state ~= 1 then return -2 end
+  if d.kind == 1 then
+    local desc=d.rx_next*16
+    hw.sync(d.hw,&d.rx_ring,desc,16,2)
+    local status=d.rx_ring.data[desc+12]
+    if (status&1) == 0 then return 1 end
+    local size=get16(d.rx_ring.data,desc+8)
+    if (status&2) == 0 or d.rx_ring.data[desc+13] ~= 0 or size < 14 or size > 1518 then
+      recycle(d); return -5
+    end
+    if size > capacity then return -6 end
+    local offset=d.rx_next*2048
+    hw.sync(d.hw,&d.rx_data,offset,size,2)
+    for i: uint32=0,<size do frame[i]=d.rx_data.data[offset+i] end
+    length[0]=size
+    recycle(d)
+  else
+    if (read(d,0x3e,2)&0x8050) ~= 0 then return stop_fault(d,-5) end
+    if (read(d,0x37,1)&1) ~= 0 then return 1 end
+    -- WRAP=1 stores a crossing packet in the allocated overflow tail.
+    hw.sync(d.hw,&d.rx_data,0,d.rx_data.size,2)
+    local at=d.rx_next
+    local flags,size=get16(d.rx_data.data,at),get16(d.rx_data.data,at+2)
+    if (flags&1) == 0 or (flags&0x3e) ~= 0 or size < 18 or size > 1522 then
+      return stop_fault(d,-5)
+    end
+    if size-4 > capacity then return -6 end
+    for i: uint32=0,<size-4 do frame[i]=d.rx_data.data[at+4+i] end
+    length[0]=size-4
+    d.rx_next=(at+size+7)&0x1ffc
+    write(d,0x38,2,(d.rx_next-16)&0xffff)
+    write(d,0x3e,2,0x01)
+  end
+  return 0
+end

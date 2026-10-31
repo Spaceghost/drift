@@ -1,0 +1,217 @@
+-- NVMe queue protocol, independent of a kernel. SPDX-License-Identifier: MIT
+## pragmas.nogc = true
+## pragmas.noentrypoint = true
+## pragmas.nochecks = true
+## pragmas.nocstaticassert = true
+## pragmas.unitname = 'drift_nvme'
+local hw = require 'drift.hw'
+local Driver: type <cimport 'drift_nvme', cinclude '"drift_nvme.h"'> = @record{
+  hw: *hw.Bus, asq: hw.DMA, acq: hw.DMA, isq: hw.DMA, icq: hw.DMA, data: hw.DMA,
+  blocks: uint64,
+  region: uint32, nsid: uint32, block_size: uint32, depth: uint32, stride: uint32,
+  timeout_us: uint32, reset_us: uint32,
+  sq_tail: array(uint32,2), cq_head: array(uint32,2), phase: array(uint32,2),
+  cid: uint32, state: uint32, last_status: uint32, last_result: uint32
+}
+local function get16(p: *[0]uint8, n: uint32): uint32
+  return uint32(p[n]) | uint32(p[n+1])<<8
+end
+local function get32(p: *[0]uint8, n: uint32): uint32
+  return get16(p,n) | get16(p,n+2)<<16
+end
+local function get64(p: *[0]uint8, n: uint32): uint64
+  return uint64(get32(p,n)) | uint64(get32(p,n+4))<<32
+end
+local function put16(p: *[0]uint8, n: uint32, v: uint32)
+  p[n],p[n+1]=uint8(v & 255),uint8((v>>8)&255)
+end
+local function put32(p: *[0]uint8, n: uint32, v: uint32)
+  put16(p,n,v); put16(p,n+2,v>>16)
+end
+local function put64(p: *[0]uint8, n: uint32, v: uint64)
+  put32(p,n,uint32(v&0xffffffff)); put32(p,n+4,uint32(v>>32))
+end
+local function zero(p: *[0]uint8, start: uint32, size: uint32)
+  for n: uint32 = 0, <size do p[start+n]=0 end
+end
+local function reg(d: *Driver, offset: uint32): uint32
+  return uint32(hw.read(d.hw,d.region,offset,4))
+end
+local function wr(d: *Driver, offset: uint32, value: uint32)
+  hw.write(d.hw,d.region,offset,4,value)
+end
+local function ready(d: *Driver, wanted: uint32): int32
+  local start=hw.time(d.hw)
+  while true do
+    local status=reg(d,0x1c)
+    if (status&1)==wanted then return 0 end
+    if wanted~=0 and (status&2)~=0 then return -5 end
+    if hw.time(d.hw)-start >= uint64(d.reset_us) then return -4 end
+    hw.wait(d.hw,10)
+  end
+end
+local function release(d: *Driver)
+  if d.data.data~=nilptr then hw.release(d.hw,&d.data); d.data.data=nilptr end
+  if d.icq.data~=nilptr then hw.release(d.hw,&d.icq); d.icq.data=nilptr end
+  if d.isq.data~=nilptr then hw.release(d.hw,&d.isq); d.isq.data=nilptr end
+  if d.acq.data~=nilptr then hw.release(d.hw,&d.acq); d.acq.data=nilptr end
+  if d.asq.data~=nilptr then hw.release(d.hw,&d.asq); d.asq.data=nilptr end
+end
+local function stop(d: *Driver): int32
+  wr(d,0x14,reg(d,0x14)&~1_u32)
+  local result=ready(d,0)
+  if result~=0 then d.state=3; return result end
+  release(d)
+  d.state=0
+  return 0
+end
+local function fatal(d: *Driver, result: int32): int32
+  if stop(d)==0 then d.state=2 end
+  return result
+end
+local function allocate(d: *Driver, buffer: *hw.DMA): int32
+  if hw.alloc(d.hw,4096,4096,buffer)~=0 then return -3 end
+  if buffer.data==nilptr or buffer.size<4096 or (buffer.address&4095)~=0 or
+     buffer.address > 0xfffffffffffff000_u64 then
+    if buffer.data~=nilptr then hw.release(d.hw,buffer); buffer.data=nilptr end
+    return -3
+  end
+  zero(buffer.data,0,4096)
+  hw.sync(d.hw,buffer,0,4096,3)
+  return 0
+end
+
+-- One outstanding command. A completion cannot authorize an unrelated CID,
+-- queue or SQ head, and a timeout ends the queue's lifetime through reset.
+local function command(d: *Driver, qid: uint32, opcode: uint32, nsid: uint32,
+                       prp: uint64, cdw10: uint32, cdw11: uint32, cdw12: uint32): int32
+  local sq,cq=&d.asq,&d.acq
+  if qid~=0 then sq,cq=&d.isq,&d.icq end
+  local slot=d.sq_tail[qid]*64
+  zero(sq.data,slot,64)
+  d.cid=(d.cid+1)&65535
+  put16(sq.data,slot,opcode)
+  put16(sq.data,slot+2,d.cid)
+  put32(sq.data,slot+4,nsid)
+  put64(sq.data,slot+24,prp)
+  put32(sq.data,slot+40,cdw10)
+  put32(sq.data,slot+44,cdw11)
+  put32(sq.data,slot+48,cdw12)
+  hw.sync(d.hw,sq,slot,64,1)
+  d.sq_tail[qid]=(d.sq_tail[qid]+1)%d.depth
+  wr(d,0x1000+(qid*2)*d.stride,d.sq_tail[qid])
+  local start=hw.time(d.hw)
+  while true do
+    local at=d.cq_head[qid]*16
+    hw.sync(d.hw,cq,at,16,2)
+    local status=get16(cq.data,at+14)
+    if (status&1)==d.phase[qid] then
+      d.last_status=status>>1
+      d.last_result=get32(cq.data,at)
+      if get16(cq.data,at+12)~=d.cid or get16(cq.data,at+10)~=qid or
+         get16(cq.data,at+8)~=d.sq_tail[qid] then return fatal(d,-6) end
+      d.cq_head[qid]=d.cq_head[qid]+1
+      if d.cq_head[qid]==d.depth then
+        d.cq_head[qid]=0; d.phase[qid]=d.phase[qid]~1
+      end
+      wr(d,0x1000+(qid*2+1)*d.stride,d.cq_head[qid])
+      if d.last_status~=0 then return -5 end
+      return 0
+    end
+    if (reg(d,0x1c)&2)~=0 then return fatal(d,-5) end
+    if hw.time(d.hw)-start >= uint64(d.timeout_us) then return fatal(d,-4) end
+    hw.wait(d.hw,10)
+  end
+end
+
+local function drift_nvme_init(d: *Driver, bus: *hw.Bus, region: uint32,
+                               nsid: uint32, timeout: uint32): int32
+                               <cexport,codename 'drift_nvme_init'>
+  if d==nilptr or hw.valid(bus)==0 or nsid==0 or nsid==0xffffffff or timeout==0 then return -1 end
+  if d.state~=0 then return -7 end
+  d.hw,d.region,d.nsid,d.timeout_us=bus,region,nsid,timeout
+  local cap=hw.read(bus,region,0,8)
+  d.reset_us=uint32(((cap>>24)&255)+1)*500000
+  if ((cap>>37)&1)==0 or ((cap>>48)&15)~=0 or (cap&65535)<1 then return -2 end
+  d.depth=8
+  if (cap&65535)<7 then d.depth=uint32((cap&65535)+1) end
+  d.stride=4_u32<<uint32((cap>>32)&15)
+  if stop(d)~=0 then return -4 end
+  d.sq_tail[0],d.sq_tail[1],d.cq_head[0],d.cq_head[1]=0,0,0,0
+  d.phase[0],d.phase[1],d.cid,d.last_status,d.last_result=1,1,0,0,0
+  if allocate(d,&d.asq)~=0 or allocate(d,&d.acq)~=0 or
+     allocate(d,&d.isq)~=0 or allocate(d,&d.icq)~=0 or allocate(d,&d.data)~=0 then
+    release(d); d.state=2; return -3
+  end
+  wr(d,0x0c,0xffffffff)
+  wr(d,0x24,(d.depth-1)|((d.depth-1)<<16))
+  hw.write(bus,region,0x28,8,d.asq.address)
+  hw.write(bus,region,0x30,8,d.acq.address)
+  wr(d,0x14,0x00460001)
+  local result=ready(d,1)
+  if result~=0 then return fatal(d,result) end
+  d.state=1
+  result=command(d,0,6,0,d.data.address,1,0,0)
+  if result~=0 then return fatal(d,result) end
+  hw.sync(bus,&d.data,0,4096,2)
+  if get32(d.data.data,516)==0 or
+     (d.data.data[512]&15)>6 or (d.data.data[512]>>4)<6 or
+     (d.data.data[513]&15)>4 or (d.data.data[513]>>4)<4 then return fatal(d,-2) end
+  zero(d.data.data,0,4096); hw.sync(bus,&d.data,0,4096,3)
+  result=command(d,0,6,nsid,d.data.address,0,0,0)
+  if result~=0 then return fatal(d,result) end
+  hw.sync(bus,&d.data,0,4096,2)
+  d.blocks=get64(d.data.data,0)
+  local format=uint32(d.data.data[26]&15)
+  if d.blocks==0 or format>uint32(d.data.data[25]) or
+     (d.data.data[26]&~15_u8)~=0 or (d.data.data[29]&7)~=0 then return fatal(d,-2) end
+  local entry=128+format*4
+  local shift=uint32(d.data.data[entry+2])
+  if get16(d.data.data,entry)~=0 or shift<9 or shift>12 then return fatal(d,-2) end
+  d.block_size=1_u32<<shift
+  result=command(d,0,5,0,d.icq.address,1|((d.depth-1)<<16),1,0)
+  if result~=0 then return fatal(d,result) end
+  result=command(d,0,1,0,d.isq.address,1|((d.depth-1)<<16),0x10001,0)
+  if result~=0 then return fatal(d,result) end
+  return 0
+end
+
+local function transfer(d: *Driver, lba: uint64, count: uint32, buffer: *[0]uint8, write: boolean): int32
+  if d==nilptr or buffer==nilptr or count==0 then return -1 end
+  if d.state~=1 then return -7 end
+  if count>4096/d.block_size or lba>=d.blocks or uint64(count)>d.blocks-lba then return -1 end
+  local size=count*d.block_size
+  if write then
+    for i: uint32=0,<size do d.data.data[i]=buffer[i] end
+    hw.sync(d.hw,&d.data,0,size,1)
+  else
+    hw.sync(d.hw,&d.data,0,size,3)
+  end
+  local opcode: uint32=2
+  if write then opcode=1 end
+  local result=command(d,1,opcode,d.nsid,d.data.address,uint32(lba&0xffffffff),uint32(lba>>32),count-1)
+  if result~=0 then return result end
+  if not write then
+    hw.sync(d.hw,&d.data,0,size,2)
+    for i: uint32=0,<size do buffer[i]=d.data.data[i] end
+  end
+  return 0
+end
+local function drift_nvme_read(d: *Driver, lba: uint64, count: uint32, buffer: *[0]uint8): int32
+                               <cexport,codename 'drift_nvme_read'>
+  return transfer(d,lba,count,buffer,false)
+end
+local function drift_nvme_write(d: *Driver, lba: uint64, count: uint32, buffer: *[0]uint8): int32
+                               <cexport,codename 'drift_nvme_write'>
+  return transfer(d,lba,count,buffer,true)
+end
+local function drift_nvme_flush(d: *Driver): int32 <cexport,codename 'drift_nvme_flush'>
+  if d==nilptr then return -1 end
+  if d.state~=1 then return -7 end
+  return command(d,1,0,d.nsid,0,0,0,0)
+end
+local function drift_nvme_close(d: *Driver): int32 <cexport,codename 'drift_nvme_close'>
+  if d==nilptr then return -1 end
+  if d.hw==nilptr then return 0 end
+  return stop(d)
+end

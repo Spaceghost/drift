@@ -1,0 +1,2 @@
+generated/*.c linguist-generated=true whitespace=-blank-at-eof
+modules/*.drv binary

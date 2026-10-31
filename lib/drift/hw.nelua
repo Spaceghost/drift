@@ -1,0 +1,15 @@
+-- Native controller substrate. SPDX-License-Identifier: MIT
+local hw: type = @record{}
+local hw.Bus: type <cimport 'drift_hw', cinclude '"drift_hw.h"', forwarddecl> = @record{}
+local hw.DMA: type <cimport 'drift_dma', cinclude '"drift_hw.h"'> = @record{
+  data: *[0]uint8, address: uint64, size: uint32, token: uint64
+}
+function hw.read(h: *hw.Bus, region: uint32, offset: uint32, width: uint32): uint64 <cimport 'drift_hw_read', cinclude '"drift_hw.h"'> end
+function hw.write(h: *hw.Bus, region: uint32, offset: uint32, width: uint32, value: uint64) <cimport 'drift_hw_write', cinclude '"drift_hw.h"'> end
+function hw.alloc(h: *hw.Bus, size: uint32, alignment: uint32, out: *hw.DMA): int32 <cimport 'drift_hw_dma', cinclude '"drift_hw.h"'> end
+function hw.release(h: *hw.Bus, buffer: *hw.DMA) <cimport 'drift_hw_release', cinclude '"drift_hw.h"'> end
+function hw.sync(h: *hw.Bus, buffer: *hw.DMA, offset: uint32, length: uint32, direction: uint32) <cimport 'drift_hw_sync', cinclude '"drift_hw.h"'> end
+function hw.time(h: *hw.Bus): uint64 <cimport 'drift_hw_time', cinclude '"drift_hw.h"'> end
+function hw.wait(h: *hw.Bus, duration: uint32) <cimport 'drift_hw_wait', cinclude '"drift_hw.h"'> end
+function hw.valid(h: *hw.Bus): int32 <cimport 'drift_hw_valid', cinclude '"drift_hw.h"'> end
+return hw

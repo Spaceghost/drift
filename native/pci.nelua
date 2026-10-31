@@ -1,0 +1,117 @@
+-- PCI discovery and resources. SPDX-License-Identifier: MIT
+## pragmas.nogc = true
+## pragmas.noentrypoint = true
+## pragmas.nochecks = true
+## pragmas.nocstaticassert = true
+## pragmas.unitname = 'drift_pci'
+local Bus: type <cimport 'drift_pci', cinclude '"drift_pci.h"', forwarddecl> = @record{}
+local Device: type <cimport 'drift_pci_device', cinclude '"drift_pci.h"'> = @record{
+  bdf:uint32, vendor:uint32, device:uint32, class_code:uint32
+}
+local Bar: type <cimport 'drift_pci_bar', cinclude '"drift_pci.h"'> = @record{
+  address:uint64, io:uint32, prefetch:uint32, width:uint32
+}
+local function read(p:*Bus, b:uint32, o:uint32):uint32 <cimport 'drift_pci_read', cinclude '"drift_pci.h"'> end
+local function write(p:*Bus, b:uint32, o:uint32, v:uint32) <cimport 'drift_pci_write', cinclude '"drift_pci.h"'> end
+local function valid(p:*Bus):int32 <cimport 'drift_pci_valid', cinclude '"drift_pci.h"'> end
+local function drift_pci_find(p:*Bus, first:uint32, last:uint32, vendor:uint32,
+                            device:uint32, index:uint32, out:*Device):int32
+                            <cexport, codename 'drift_pci_find'>
+  if valid(p)==0 or out==nilptr or first>last or last>255 or vendor>65535 or device>65535 then return -1 end
+  local bus=first
+  while bus<=last do
+    local slot:uint32=0
+    while slot<32 do
+      local base=(bus<<8)|(slot<<3)
+      local id=read(p,base,0)
+      if (id&65535)~=65535 then
+        local count:uint32=1
+        if (read(p,base,12)&0x800000)~=0 then count=8 end
+        local fn:uint32=0
+        while fn<count do
+          local bdf=base|fn
+          id=read(p,bdf,0)
+          if (id&65535)~=65535 and (vendor==65535 or (id&65535)==vendor) and
+             (device==65535 or (id>>16)==device) then
+            if index==0 then
+              out.bdf=bdf; out.vendor=id&65535; out.device=id>>16
+              out.class_code=read(p,bdf,8)>>8
+              return 0
+            end
+            index=index-1
+          end
+          fn=fn+1
+        end
+      end
+      slot=slot+1
+    end
+    bus=bus+1
+  end
+  return 1
+end
+local function drift_pci_cap(p:*Bus,bdf:uint32,id:uint32,index:uint32,out:*[0]uint32):int32
+                            <cexport, codename 'drift_pci_cap'>
+  if valid(p)==0 or bdf>65535 or id>255 or out==nilptr then return -1 end
+  if (read(p,bdf,4)&0x100000)==0 then return 1 end
+  if ((read(p,bdf,12)>>16)&127)>1 then return -2 end
+  local offset=read(p,bdf,52)&255
+  local seen:uint64=0
+  while offset~=0 do
+    if offset<64 or offset>252 or (offset&3)~=0 then return -2 end
+    local bit=1_u64<<(offset>>2)
+    if (seen&bit)~=0 then return -2 end
+    seen=seen|bit
+    local cap=read(p,bdf,offset)
+    if (cap&255)==id then
+      if index==0 then out[0]=offset; return 0 end
+      index=index-1
+    end
+    offset=(cap>>8)&255
+  end
+  return 1
+end
+local function drift_pci_get_bar(p:*Bus,bdf:uint32,index:uint32,out:*Bar):int32
+                                <cexport, codename 'drift_pci_get_bar'>
+  if valid(p)==0 or bdf>65535 or index>5 or out==nilptr then return -1 end
+  local kind=(read(p,bdf,12)>>16)&127
+  local limit:uint32=6
+  if kind==1 then limit=2 elseif kind~=0 then return -2 end
+  if index>=limit then return -1 end
+  -- Walk from BAR0 so a 64-bit BAR's upper half cannot be mistaken for a BAR.
+  local i:uint32=0
+  while i<limit do
+    local value=read(p,bdf,16+i*4)
+    local width:uint32=32
+    local io=value&1
+    if io==0 then
+      if (value&6)==4 then width=64
+      elseif (value&6)~=0 then return -2 end
+    end
+    if i==index then
+      if value==0 or value==0xffffffff then return -2 end
+      out.io=io; out.width=width; out.prefetch=0
+      if io~=0 then out.address=uint64(value&0xfffffffc)
+      else
+        out.address=uint64(value&0xfffffff0); out.prefetch=(value>>3)&1
+        if width==64 then
+          if i+1>=limit then return -2 end
+          out.address=out.address|(uint64(read(p,bdf,20+i*4))<<32)
+        end
+      end
+      return 0
+    end
+    if width==64 then
+      if i+1==index then return -1 end
+      i=i+2
+    else i=i+1 end
+  end
+  return -1
+end
+local function drift_pci_enable(p:*Bus,bdf:uint32,mask:uint32):int32
+                               <cexport, codename 'drift_pci_enable'>
+  if valid(p)==0 or bdf>65535 or (mask&~7_u32)~=0 then return -1 end
+  if (read(p,bdf,0)&65535)==65535 then return 1 end
+  -- Status is W1C; never echo its readback into the upper half of this write.
+  write(p,bdf,4,(read(p,bdf,4)&65535)|mask)
+  return 0
+end

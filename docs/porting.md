@@ -2,6 +2,10 @@
 
 Port the transport once. Share protocol modules across ports.
 
+For controller drivers (Virtio, xHCI, NVMe, Ethernet and AHCI), start with
+[the native resource interface](native.md). This page describes the bounded
+protocol VM and its SPI/record-stream transports.
+
 For a complete runnable introduction, follow [the walkthrough](walkthrough.md).
 
 ## Build the core

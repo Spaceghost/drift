@@ -7,6 +7,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - run: make check sanitize freestanding size
+      - run: make check sanitize native-sanitize freestanding size
+      - run: sudo apt-get update && sudo apt-get install -y qemu-system-x86
+      - run: make qemu-check kernel-check
       - run: sh tools/bootstrap.sh
       - run: make verify-generated NELUA="$PWD/.toolchain/nelua/nelua"

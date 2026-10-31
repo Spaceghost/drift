@@ -1,0 +1,210 @@
+-- USB-standard CDC ACM serial and ECM Ethernet. SPDX-License-Identifier: MIT
+## pragmas.nogc = true
+## pragmas.noentrypoint = true
+## pragmas.nochecks = true
+## pragmas.nocstaticassert = true
+## pragmas.unitname = 'drift_usb_classes'
+-- Imported field access uses the C header's actual offsets. No USB object is
+-- allocated, copied or sized here; only these public fields are needed.
+local USB: type <cimport 'drift_usb', cinclude '"drift_usb.h"'> = @record{
+  state: uint32, total_config: uint32, config: [1024]uint8
+}
+local CDC: type <cimport 'drift_usb_cdc', cinclude '"drift_usb_classes.h"'> = @record{
+  device: *USB, kind:uint32, control_interface:uint32, data_interface:uint32, alternate:uint32,
+  endpoint_in:uint32, endpoint_out:uint32, out_packet_size:uint32, maximum_segment:uint32, state:uint32, mac:[6]uint8
+}
+local function control(d:*USB,t:uint8,r:uint8,v:uint16,i:uint16,b:*[0]uint8,n:uint32,got:*uint32):int32
+  <cimport 'drift_usb_control',cinclude '"drift_usb.h"'> end
+local function transfer(d:*USB,e:uint8,b:*[0]uint8,n:uint32,got:*uint32):int32
+  <cimport 'drift_usb_transfer',cinclude '"drift_usb.h"'> end
+local function alternate(d:*USB,i:uint8,a:uint8):int32
+  <cimport 'drift_usb_set_interface',cinclude '"drift_usb.h"'> end
+local function get16(p:*[0]uint8,o:uint32):uint32 return uint32(p[o]) | (uint32(p[o+1])<<8) end
+local function hex(c:uint8):int32
+  if c>=48 and c<=57 then return int32(c)-48 end
+  if c>=65 and c<=70 then return int32(c)-55 end
+  if c>=97 and c<=102 then return int32(c)-87 end
+  return -1
+end
+local function mac_string(c:*CDC,index:uint32):int32
+  local data:[256]uint8
+  local got:uint32=0
+  local result=control(c.device,0x80,6,0x0300,0,&data[0],255,&got)
+  if result~=0 then return result end
+  if got<4 or data[1]~=3 or data[0]<4 or data[0]>got or (data[0]&1)~=0 then return -71 end
+  local language=get16(&data[0],2)
+  result=control(c.device,0x80,6,uint16(0x0300|index),uint16(language),&data[0],255,&got)
+  if result~=0 then return result end
+  if got<26 or data[0]~=26 or data[1]~=3 then return -71 end
+  for i:uint32=0,5 do
+    local a,b=hex(data[2+i*4]),hex(data[4+i*4])
+    if a<0 or b<0 or data[3+i*4]~=0 or data[5+i*4]~=0 then return -71 end
+    c.mac[i]=uint8(a*16+b)
+  end
+  if (c.mac[0]&1)~=0 then return -71 end
+  local nonzero:uint8=0
+  for i:uint32=0,5 do nonzero=nonzero|c.mac[i] end
+  if nonzero==0 then return -71 end
+  return 0
+end
+local function ready(c:*CDC):boolean
+  return c~=nilptr and c.state==1 and c.device~=nilptr and c.device.state==1
+end
+local function drift_usb_cdc_open(c:*CDC,d:*USB,kind:uint32,interface:uint32):int32
+  <cexport,codename 'drift_usb_cdc_open'>
+  if c==nilptr or d==nilptr or c.state~=0 or d.state~=1 or (kind~=1 and kind~=2) then return -22 end
+  local total=d.total_config
+  if total<9 or total>1024 or d.config[0]<9 or d.config[1]~=2 or get16(&d.config[0],2)~=total then return -71 end
+  local chosen=false
+  local current=false
+  local master:uint32=0
+  local slave:uint32=0xffffffff
+  local mac_index:uint32=0
+  local maximum:uint32=0
+  local acm:uint32=0
+  local union_seen=false
+  local functional_seen=false
+  local at:uint32=0
+  while at<total do
+    local n=uint32(d.config[at])
+    if n<2 or n>total-at then return -71 end
+    local t=d.config[at+1]
+    if t==4 then
+      if n<9 then return -71 end
+      current=false
+      if not chosen and d.config[at+3]==0 and d.config[at+5]==2 and
+          ((kind==1 and d.config[at+6]==2 and d.config[at+7]<=6) or (kind==2 and d.config[at+6]==6 and d.config[at+7]==0)) and
+          (interface==0xffffffff or d.config[at+2]==interface) then
+        master=d.config[at+2];chosen=true;current=true
+      end
+    elseif current and t==0x24 then
+      if n<3 then return -71 end
+      local subtype=d.config[at+2]
+      if subtype==6 then
+        if n~=5 or union_seen or d.config[at+3]~=master or d.config[at+4]==master then return -71 end
+        slave=d.config[at+4];union_seen=true
+      elseif kind==1 and subtype==2 then
+        if n~=4 or functional_seen then return -71 end
+        acm=d.config[at+3];functional_seen=true
+      elseif kind==2 and subtype==15 then
+        if n~=13 or functional_seen then return -71 end
+        mac_index=d.config[at+3];maximum=get16(&d.config[0],at+8);functional_seen=true
+      end
+    end
+    at=at+n
+  end
+  if not chosen or not union_seen or not functional_seen then return -95 end
+  if kind==1 and (acm&2)==0 then return -95 end
+  if kind==2 and (mac_index==0 or maximum<14 or maximum>16384) then return -95 end
+  -- Locate a complete data alternate; endpoint descriptors are scoped to the
+  -- matching interface, never borrowed from another function in a composite.
+  at=0;current=false
+  local selected=false
+  local input:uint32=0
+  local output:uint32=0
+  local packet:uint32=0
+  local alt:uint32=0
+  local expected:uint32=0
+  local count:uint32=0
+  local valid=true
+  while at<=total do
+    local n:uint32=0
+    local t:uint8=4
+    if at<total then n=d.config[at];t=d.config[at+1] end
+    if t==4 then
+      if current and valid and expected==2 and count==2 and input~=0 and output~=0 and not selected then
+        c.endpoint_in=input;c.endpoint_out=output;c.out_packet_size=packet;c.alternate=alt;selected=true
+      end
+      current=false;input=0;output=0;packet=0;count=0;valid=true
+      if at<total and d.config[at+2]==slave and d.config[at+5]==10 and d.config[at+6]==0 and d.config[at+7]==0 then
+        current=true;alt=d.config[at+3];expected=d.config[at+4]
+      end
+    elseif current and t==5 then
+      if n<7 then return -71 end
+      count=count+1
+      local endpoint=uint32(d.config[at+2])
+      if (endpoint&0x70)~=0 or (endpoint&15)==0 or (d.config[at+3]&3)~=2 or
+          (get16(&d.config[0],at+4)&0x7ff)==0 or get16(&d.config[0],at+4)>512 then valid=false end
+      if (endpoint&128)~=0 then
+        if input~=0 then valid=false end
+        input=endpoint
+      else
+        if output~=0 then valid=false end
+        output=endpoint;packet=get16(&d.config[0],at+4)&0x7ff
+      end
+    end
+    if at==total then break end
+    at=at+n
+  end
+  if not selected then return -95 end
+  c.device=d;c.kind=kind;c.control_interface=master;c.data_interface=slave
+  c.maximum_segment=kind==2 and maximum or 16384
+  for i:uint32=0,5 do c.mac[i]=0 end
+  if c.alternate~=0 then
+    local result=alternate(d,uint8(slave),uint8(c.alternate))
+    if result~=0 then return result end
+  end
+  if kind==2 then
+    local result=mac_string(c,mac_index)
+    if result~=0 then return result end
+    local got:uint32=0
+    result=control(d,0x21,0x43,12,uint16(master),nilptr,0,&got)
+    if result~=0 then return result end
+    if got~=0 then return -71 end
+  end
+  c.state=1
+  return 0
+end
+local function drift_usb_acm_configure(c:*CDC,baud:uint32,stop:uint32,parity:uint32,bits:uint32,lines:uint32):int32
+  <cexport,codename 'drift_usb_acm_configure'>
+  if not ready(c) or c.kind~=1 or baud==0 or stop>2 or parity>4 or
+      ((bits<5 or bits>8) and bits~=16) or lines>3 then return -22 end
+  local data:[7]uint8
+  for i:uint32=0,3 do data[i]=uint8(baud>>(8*i)) end
+  data[4]=uint8(stop);data[5]=uint8(parity);data[6]=uint8(bits)
+  local got:uint32=0
+  local result=control(c.device,0x21,0x20,0,uint16(c.control_interface),&data[0],7,&got)
+  if result~=0 then return result end
+  if got~=7 then return -71 end
+  result=control(c.device,0x21,0x22,uint16(lines),uint16(c.control_interface),nilptr,0,&got)
+  if result~=0 then return result end
+  if got~=0 then return -71 end
+  return 0
+end
+local function drift_usb_cdc_read(c:*CDC,data:*[0]uint8,capacity:uint32):int32
+  <cexport,codename 'drift_usb_cdc_read'>
+  if not ready(c) or data==nilptr or capacity==0 or capacity>16384 then return -22 end
+  if c.kind==2 and capacity<c.maximum_segment then return -22 end
+  local got:uint32=0
+  local result=transfer(c.device,uint8(c.endpoint_in),data,capacity,&got)
+  if result==-11 then return 0 end
+  if result~=0 then return result end
+  if got>capacity or (c.kind==2 and got~=0 and (got<14 or got>c.maximum_segment)) then return -71 end
+  return int32(got)
+end
+local function drift_usb_cdc_write(c:*CDC,data:*[0]uint8,size:uint32):int32
+  <cexport,codename 'drift_usb_cdc_write'>
+  if not ready(c) or data==nilptr or size==0 or size>c.maximum_segment or (c.kind==2 and size<14) then return -22 end
+  local got:uint32=0
+  local result=transfer(c.device,uint8(c.endpoint_out),data,size,&got)
+  if result~=0 then return result end
+  if got~=size then return -71 end
+  if c.kind==2 and size%c.out_packet_size==0 then
+    result=transfer(c.device,uint8(c.endpoint_out),nilptr,0,&got)
+    if result~=0 then return result end
+    if got~=0 then return -71 end
+  end
+  return int32(size)
+end
+local function drift_usb_cdc_close(c:*CDC):int32 <cexport,codename 'drift_usb_cdc_close'>
+  if c==nilptr then return -22 end
+  if c.state==0 then return 0 end
+  local result:int32=0
+  if ready(c) then
+    local got:uint32=0
+    result=control(c.device,0x21,c.kind==1 and 0x22_u8 or 0x43_u8,0,uint16(c.control_interface),nilptr,0,&got)
+    if result==0 and got~=0 then result=-71 end
+  else result=-22 end
+  c.state=0
+  return result
+end

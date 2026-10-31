@@ -1,4 +1,50 @@
-# Verification of the first working machine
+# Verification
+
+## Native controller kit
+
+The native library is compiled from Nelua and tested through independent
+register/DMA models, real emulated devices, and a booted freestanding kernel.
+The common resource interface does not implement device protocols for the
+library: those live in the portable driver source.
+
+```sh
+make native-check
+make native-sanitize
+make qemu-check
+make kernel-check
+```
+
+The native suite includes 4,096 Virtio checks, 303,876 NVMe checks, 138,525
+AHCI checks, 6,435 Ethernet checks, 425 CDC checks, 2,824 hub checks and 1,595,440
+common-I/O checks, plus PCI and xHCI model scenarios. These assertion counts
+include repeated data/range checks; the real-device paths below are separate
+integration evidence.
+
+The real controller checks use QEMU 8.2.2 under TCG, without KVM or privileged
+host device access. Scratch disk images and isolated network connections are
+created for each run. The qtest host maps separate CPU/DMA shadows onto guest
+RAM, while the reference kernel uses coherent identity-mapped DMA. Both execute
+the same generated controller code. The reference kernel is a booted x86 OS
+example; these are two resource hosts, **not two independent OS ports**.
+
+The kernel performs disk read/write/flush/readback/restore through AHCI, NVMe,
+Virtio and USB storage, plus Ethernet frame exchange through Virtio, Intel
+82540EM and RTL8139. The scripts check individual completion markers and QEMU's
+final exit result; a missing controller or failed operation fails the run.
+
+Independent models cover nonidentity and high DMA addresses, allocation failure,
+malformed completions, wraparound, timeout, failed reset and retained/quarantined
+DMA. The shadow models enforce publish/acquire calls. They do not simulate all
+real cache hardware; the resource contract requires coherent or uncached DMA.
+
+The initial APIs poll and serialize requests. Physical hardware qualification,
+interrupt-driven operation, multicore contention, throughput benchmarks and a
+second independent OS integration are not established. USB and NIC support is
+limited to the subsets named in their guides. The library is a new implementation,
+not an audited production replacement for a mature kernel's complete drivers.
+
+## Original protocol machine
+
 
 Date: 2026-10-30. These results describe this source release, not a hardware
 certification or a complete additional operating-system port.

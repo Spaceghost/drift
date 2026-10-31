@@ -1,0 +1,211 @@
+-- One-slot AHCI/SATA disk engine. SPDX-License-Identifier: MIT
+## pragmas.nogc = true
+## pragmas.noentrypoint = true
+## pragmas.nochecks = true
+## pragmas.nocstaticassert = true
+## pragmas.unitname = 'drift_ahci'
+local hw = require 'drift.hw'
+local Disk: type <cimport 'drift_ahci', cinclude '"drift_ahci.h"'> = @record{
+  hw: *hw.Bus, memory: hw.DMA, sectors: uint64,
+  sector_size: uint32, region: uint32, port: uint32, timeout_us: uint32, cap: uint32, flush_command: uint32,
+  state: int32
+}
+local function rd(d: *Disk, offset: uint32): uint32
+  return uint32(hw.read(d.hw,d.region,offset,4))
+end
+local function wr(d: *Disk, offset: uint32, value: uint32)
+  hw.write(d.hw,d.region,offset,4,value)
+end
+local function reg(d: *Disk, offset: uint32): uint32
+  return 0x100+d.port*0x80+offset
+end
+local function load16(p: *[0]uint8, off: uint32): uint32
+  return uint32(p[off]) | (uint32(p[off+1])<<8)
+end
+local function put32(p: *[0]uint8, off: uint32, value: uint32)
+  for i: uint32=0,3 do p[off+i]=uint8(value>>(i*8)) end
+end
+local function clear(p: *[0]uint8, off: uint32, size: uint32)
+  for i: uint32=0,<size do p[off+i]=0 end
+end
+local function expired(d: *Disk, start: uint64): boolean
+  return hw.time(d.hw)-start >= uint64(d.timeout_us)
+end
+local function wait_bits(d: *Disk, offset: uint32, mask: uint32, want: uint32): int32
+  local start=hw.time(d.hw)
+  while (rd(d,offset)&mask) ~= want do
+    if expired(d,start) then return -5 end
+    hw.wait(d.hw,10)
+  end
+  return 0
+end
+local function stop(d: *Disk): int32
+  local off=reg(d,0x18)
+  wr(d,off,rd(d,off)&~1_u32)
+  if wait_bits(d,off,0x8000,0) ~= 0 then return -5 end
+  wr(d,off,rd(d,off)&~0x10_u32)
+  return wait_bits(d,off,0x4000,0)
+end
+local function failed(d: *Disk, status: int32): int32
+  d.state=2 -- Never reuse a queue or buffer after an uncertain completion.
+  -- Memory is deliberately retained. close must prove the DMA engine stopped.
+  return status
+end
+local function command(d: *Disk, opcode: uint8, lba: uint64,
+                       count: uint32, bytes: uint32, writing: boolean): int32
+  if d.state ~= 1 then return -4 end
+  if rd(d,reg(d,0x38)) ~= 0 or rd(d,reg(d,0x34)) ~= 0 then return failed(d,-4) end
+  local start=hw.time(d.hw)
+  while (rd(d,reg(d,0x20))&0x88) ~= 0 do
+    if expired(d,start) then return failed(d,-5) end
+    hw.wait(d.hw,10)
+  end
+  local p=d.memory.data
+  clear(p,0,32)
+  clear(p,1280,144)
+  local flags: uint32=5
+  if writing then flags=flags|0x40 end
+  if bytes ~= 0 then flags=flags|0x10000 end
+  put32(p,0,flags)
+  local table=d.memory.address+1280
+  put32(p,8,uint32(table))
+  put32(p,12,uint32(table>>32))
+  p[1280],p[1281],p[1282]=0x27,0x80,opcode
+  p[1284],p[1285],p[1286]=uint8(lba),uint8(lba>>8),uint8(lba>>16)
+  p[1287]=0x40
+  p[1288],p[1289],p[1290]=uint8(lba>>24),uint8(lba>>32),uint8(lba>>40)
+  p[1292],p[1293]=uint8(count),uint8(count>>8)
+  if bytes ~= 0 then
+    local address=d.memory.address+4096
+    put32(p,1408,uint32(address))
+    put32(p,1412,uint32(address>>32))
+    put32(p,1420,(bytes-1)|0x80000000_u32)
+    hw.sync(d.hw,&d.memory,4096,bytes,writing and 1 or 2)
+  end
+  hw.sync(d.hw,&d.memory,0,4096,1)
+  wr(d,reg(d,0x10),0xffffffff_u32)
+  wr(d,reg(d,0x38),1)
+  start=hw.time(d.hw)
+  while true do
+    local status=rd(d,reg(d,0x10))
+    if (status&0x7d000000_u32) ~= 0 then return failed(d,-6) end
+    if (rd(d,reg(d,0x38))&1) == 0 then break end
+    if expired(d,start) then return failed(d,-5) end
+    hw.wait(d.hw,10)
+  end
+  if (rd(d,reg(d,0x20))&0x89) ~= 0 then return failed(d,-6) end
+  -- Fetch PRDBC and data only after device ownership has ended.
+  hw.sync(d.hw,&d.memory,0,32,2)
+  if bytes ~= 0 then
+    local got=uint32(p[4])|(uint32(p[5])<<8)|(uint32(p[6])<<16)|(uint32(p[7])<<24)
+    if got ~= bytes then return failed(d,-6) end
+    if not writing then hw.sync(d.hw,&d.memory,4096,bytes,2) end
+  end
+  return 0
+end
+local function drift_ahci_close(d: *Disk): int32 <cexport, codename 'drift_ahci_close'>
+  if d == nilptr then return -1 end
+  if d.state == 0 then return 0 end
+  if hw.valid(d.hw) == 0 then return -1 end
+  if stop(d) ~= 0 then return failed(d,-5) end
+  if d.memory.data ~= nilptr then
+    hw.release(d.hw,&d.memory)
+    d.memory.data=nilptr
+    d.memory.address,d.memory.size,d.memory.token=0,0,0
+  end
+  d.state,d.sectors,d.sector_size,d.flush_command=0,0,0,0
+  return 0
+end
+local function drift_ahci_init(d: *Disk, bus: *hw.Bus, region: uint32,
+                             port: uint32, timeout_us: uint32): int32
+                             <cexport, codename 'drift_ahci_init'>
+  if d == nilptr or hw.valid(bus) == 0 or port >= 32 or timeout_us == 0 then return -1 end
+  if d.state ~= 0 then return -4 end
+  d.hw,d.region,d.port,d.timeout_us=bus,region,port,timeout_us
+  d.cap=rd(d,0)
+  if port > (d.cap&31) or (rd(d,0x0c)&(1_u32<<port)) == 0 then return -3 end
+  -- Respect firmware ownership before touching an AHCI engine.
+  if (rd(d,0x24)&1) ~= 0 then
+    wr(d,0x28,rd(d,0x28)|2)
+    if wait_bits(d,0x28,0x11,0) ~= 0 then return -5 end
+  end
+  wr(d,4,rd(d,4)|0x80000000_u32)
+  if (rd(d,4)&0x80000000_u32) == 0 then return -2 end
+  d.state=2
+  if stop(d) ~= 0 then return -5 end
+  if (rd(d,reg(d,0x28))&0xf0f) ~= 0x103 then return -3 end
+  if hw.alloc(bus,69632,4096,&d.memory) ~= 0 then return -7 end
+  if d.memory.data == nilptr or d.memory.size < 69632 or (d.memory.address&4095) ~= 0 or
+     d.memory.address > 0xffffffffffffffff_u64-69631 or
+     ((d.cap&0x80000000_u32) == 0 and d.memory.address+69631 > 0xffffffff_u64) then
+    if d.memory.data ~= nilptr then hw.release(bus,&d.memory) end
+    d.memory.data=nilptr
+    return -7
+  end
+  clear(d.memory.data,0,69632)
+  hw.sync(bus,&d.memory,0,69632,3)
+  wr(d,reg(d,0),uint32(d.memory.address))
+  wr(d,reg(d,4),uint32(d.memory.address>>32))
+  wr(d,reg(d,8),uint32(d.memory.address+1024))
+  wr(d,reg(d,12),uint32((d.memory.address+1024)>>32))
+  wr(d,reg(d,0x14),0)
+  wr(d,reg(d,0x30),0xffffffff_u32)
+  wr(d,reg(d,0x10),0xffffffff_u32)
+  wr(d,reg(d,0x18),rd(d,reg(d,0x18))|0x10)
+  wr(d,reg(d,0x18),rd(d,reg(d,0x18))|1)
+  local start=hw.time(bus)
+  while rd(d,reg(d,0x24)) == 0xffffffff_u32 or rd(d,reg(d,0x24)) == 0 do
+    if expired(d,start) then return -5 end
+    hw.wait(bus,10)
+  end
+  if rd(d,reg(d,0x24)) ~= 0x00000101 then return -2 end
+  d.state=1
+  local result=command(d,0xec,0,0,512,false)
+  if result ~= 0 then return result end
+  local p=d.memory.data
+  -- Only ATA disks with valid LBA48 capability words are admitted.
+  local word83=load16(p,4096+166)
+  if (word83&0xc400) ~= 0x4400 then return failed(d,-2) end
+  local capacity: uint64=0
+  for i: uint32=0,3 do capacity=capacity|(uint64(load16(p,4096+200+i*2))<<(i*16)) end
+  if capacity == 0 or capacity > 0x1000000000000_u64 then return failed(d,-2) end
+  d.sector_size=512
+  local size_word=load16(p,4096+212)
+  if (size_word&0xc000) == 0x4000 and (size_word&0x1000) ~= 0 then
+    local words=load16(p,4096+234)|(load16(p,4096+236)<<16)
+    if words ~= 2048 then return failed(d,-2) end
+    d.sector_size=4096
+  end
+  d.flush_command=0
+  if (word83&0x2000) ~= 0 then d.flush_command=0xea
+  elseif (word83&0x1000) ~= 0 then d.flush_command=0xe7 end
+  d.sectors=capacity
+  return 0
+end
+local function transfer(d: *Disk, lba: uint64, count: uint32,
+                        buffer: *[0]uint8, writing: boolean): int32
+  if d == nilptr or buffer == nilptr or count == 0 then return -1 end
+  if d.state ~= 1 then return -4 end
+  if count > 65536/d.sector_size or lba >= d.sectors or uint64(count) > d.sectors-lba then return -1 end
+  local bytes=count*d.sector_size
+  if writing then for i: uint32=0,<bytes do d.memory.data[4096+i]=buffer[i] end end
+  local result=command(d,writing and 0x35 or 0x25,lba,count,bytes,writing)
+  if result == 0 and not writing then
+    for i: uint32=0,<bytes do buffer[i]=d.memory.data[4096+i] end
+  end
+  return result
+end
+local function drift_ahci_read(d: *Disk, lba: uint64, count: uint32, buffer: *[0]uint8): int32
+                             <cexport, codename 'drift_ahci_read'>
+  return transfer(d,lba,count,buffer,false)
+end
+local function drift_ahci_write(d: *Disk, lba: uint64, count: uint32, buffer: *[0]uint8): int32
+                              <cexport, codename 'drift_ahci_write'>
+  return transfer(d,lba,count,buffer,true)
+end
+local function drift_ahci_flush(d: *Disk): int32 <cexport, codename 'drift_ahci_flush'>
+  if d == nilptr then return -1 end
+  if d.state ~= 1 then return -4 end
+  if d.flush_command == 0 then return -2 end
+  return command(d,uint8(d.flush_command),0,0,0,false)
+end

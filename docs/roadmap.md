@@ -1,5 +1,12 @@
 # The next working pieces
 
+Native controller implementations now cover the first five target families:
+Virtio, USB/xHCI, NVMe, selected wired Ethernet and AHCI/SATA.
+See [the native driver contract](native.md) and each driver guide for the exact
+initial subsets. The priorities below describe the original protocol VM; they
+are not the entire project roadmap.
+
+
 Keep the machine small by adding capabilities only for a demonstrated driver.
 
 Shipped: read-only flash backup with per-block double reads, a descriptor-checked

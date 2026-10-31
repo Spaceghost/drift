@@ -1,0 +1,641 @@
+-- xHCI root-port engine and USB HID/BOT classes. SPDX-License-Identifier: MIT
+## pragmas.nogc = true
+## pragmas.noentrypoint = true
+## pragmas.nochecks = true
+## pragmas.nocstaticassert = true
+## pragmas.unitname = 'drift_usb'
+local hw = require 'drift.hw'
+local USB: type <cimport 'drift_usb', cinclude '"drift_usb.h"'> = @record{
+  hw: *hw.Bus, arena: hw.DMA,
+  region: uint32, op: uint32, runtime: uint32, doorbells: uint32, context_size: uint32, ports: uint32,
+  command_index: uint32, command_cycle: uint32, event_index: uint32, event_cycle: uint32,
+  slot: uint32, port: uint32, speed: uint32, state: uint32, error: uint32, configuration: uint32, interface_number: uint32,
+  kind: uint32, endpoint_in: uint32, endpoint_out: uint32, max_packet: uint32, total_config: uint32,
+  ring_offset: [32]uint32, ring_index: [32]uint32, ring_cycle: [32]uint32,
+  tag: uint32, sector_size: uint32, blocks: uint64, pending_count: [32]uint32, pending_pointer: [32]uint64, completion: [32]int32, completed_length: [32]uint32, halted: [32]uint32, device_context: uint32, route: uint32, parent_slot: uint32, parent_port: uint32, hub_speed: uint32, config_index: uint32, config: [1024]uint8
+}
+local function get(p: *[0]uint8, o: uint32): uint32
+  return uint32(p[o]) | uint32(p[o+1])<<8 | uint32(p[o+2])<<16 | uint32(p[o+3])<<24
+end
+local function put(p: *[0]uint8, o: uint32, v: uint32)
+  for i: uint32=0,3 do p[o+i]=uint8((v>>(i*8))&255) end
+end
+local function put64(p: *[0]uint8, o: uint32, v: uint64)
+  put(p,o,uint32(v&0xffffffff)); put(p,o+4,uint32(v>>32))
+end
+local function rd(d: *USB, o: uint32): uint32 return uint32(hw.read(d.hw,d.region,o,4)) end
+local function wr(d: *USB, o: uint32, v: uint32) hw.write(d.hw,d.region,o,4,v) end
+local function wr64(d: *USB, o: uint32, v: uint64)
+  wr(d,o,uint32(v&0xffffffff)); wr(d,o+4,uint32(v>>32))
+end
+local function sync(d: *USB,o: uint32,n: uint32,direction: uint32) hw.sync(d.hw,&d.arena,o,n,direction) end
+local function clear(d: *USB,o: uint32,n: uint32)
+  for i: uint32=0,<n do d.arena.data[o+i]=0 end
+end
+local function waitreg(d: *USB,o: uint32,mask: uint32,value: uint32): int32
+  local start=hw.time(d.hw)
+  while (rd(d,o)&mask)~=value do
+    if hw.time(d.hw)-start>=1000000 then return -110 end
+    hw.wait(d.hw,100)
+  end
+  return 0
+end
+local function stop(d: *USB): int32
+  wr(d,d.op,rd(d,d.op)&~1_u32)
+  if waitreg(d,d.op+4,1,1)~=0 then d.state=3; return -110 end
+  d.state=2
+  return 0
+end
+local function poison(d: *USB,e: int32): int32
+  d.error=uint32(e); stop(d); return e
+end
+local function trb(d: *USB,o: uint32,p: uint64,status: uint32,control: uint32)
+  put64(d.arena.data,o,p); put(d.arena.data,o+8,status); put(d.arena.data,o+12,control)
+  sync(d,o,16,1)
+end
+-- Producer ring link TRBs retain a cycle bit and toggle when wrapping.
+local function enqueue(d: *USB,index: uint32,p: uint64,status: uint32,control: uint32): uint64
+  local base=d.ring_offset[index]
+  local at=base+d.ring_index[index]*16
+  trb(d,at,p,status,control|d.ring_cycle[index])
+  d.ring_index[index]=d.ring_index[index]+1
+  if d.ring_index[index]==255 then
+    trb(d,base+4080,d.arena.address+base,0,6<<10|2|d.ring_cycle[index])
+    d.ring_index[index]=0; d.ring_cycle[index]=d.ring_cycle[index]~1
+  end
+  return d.arena.address+at
+end
+-- Consume only matching, bounded event-ring entries; never trust device pointers.
+local function event(d: *USB,kind: uint32,target: uint64,endpoint: uint32,request: uint32,short_at: uint64,actual: *uint32): int32
+  if kind==32 and endpoint>1 and d.completion[endpoint]~=0 then
+    local result=d.completion[endpoint]; d.completion[endpoint]=0
+    if actual~=nilptr then $actual=d.completed_length[endpoint] end
+    if result==1 then return 0 end
+    return result
+  end
+  local start=hw.time(d.hw)
+  local short_length=request
+  while true do
+    if hw.time(d.hw)-start>=1000000 then
+      if kind==32 and endpoint>1 and (endpoint&1)~=0 and (d.kind==1 or d.kind==2 or d.kind==4) then return -11 end
+      return poison(d,-110)
+    end
+    if d.port~=0 and (rd(d,d.op+0x400+(d.port-1)*16)&1)==0 then return poison(d,-19) end
+    local at=8192+d.event_index*16
+    sync(d,at,16,2)
+    local control=get(d.arena.data,at+12)
+    if (control&1)==d.event_cycle then
+      local status=get(d.arena.data,at+8)
+      local parameter=uint64(get(d.arena.data,at))|uint64(get(d.arena.data,at+4))<<32
+      local etype=(control>>10)&63
+      d.event_index=d.event_index+1
+      if d.event_index==256 then d.event_index=0; d.event_cycle=d.event_cycle~1 end
+      wr64(d,d.runtime+0x38,d.arena.address+8192+d.event_index*16|8)
+      local ev_endpoint=(control>>16)&31
+      if etype==32 and ev_endpoint>1 and (kind~=32 or ev_endpoint~=endpoint) then
+        local code=status>>24
+        if (control>>24)~=d.slot or d.pending_count[ev_endpoint]==0 or
+           parameter~=d.pending_pointer[ev_endpoint] or d.completion[ev_endpoint]~=0 or
+           (status&0xffffff)>d.pending_count[ev_endpoint] then return poison(d,-5) end
+        if code==1 or code==13 then
+          d.completion[ev_endpoint]=1
+          d.completed_length[ev_endpoint]=d.pending_count[ev_endpoint]-(status&0xffffff)
+        elseif code==6 then d.completion[ev_endpoint]=-32; d.halted[ev_endpoint]=1
+        else return poison(d,-5) end
+      elseif etype==kind then
+        local code=status>>24
+        if kind==33 then
+          if (parameter&~15_u64)~=target or code~=1 then return poison(d,-5) end
+          d.slot=(control>>24)&255
+          if actual~=nilptr then $actual=0 end
+          return 0
+        end
+        if ((control>>16)&31)~=endpoint or (control>>24)~=d.slot or (status&0xffffff)>request then return poison(d,-5) end
+        if parameter~=target and parameter~=short_at then return poison(d,-5) end
+        if code==6 then d.halted[endpoint]=1; return -32 end -- endpoint stall: class recovery can reset it
+        if code~=1 and code~=13 then return poison(d,-5) end
+        if code==13 then short_length=request-(status&0xffffff) end
+        if parameter==target then
+          if actual~=nilptr then $actual=short_length end
+          return 0
+        end
+      elseif etype~=34 then return poison(d,-5) end
+    else
+      if hw.time(d.hw)-start>=1000000 then
+        if kind==32 and endpoint>1 and (endpoint&1)~=0 and (d.kind==1 or d.kind==2 or d.kind==4) then return -11 end
+        return poison(d,-110)
+      end
+      hw.wait(d.hw,100)
+    end
+  end
+end
+local function command(d: *USB,p: uint64,c: uint32): int32
+  local at=enqueue(d,0,p,0,c)
+  wr(d,d.doorbells,0)
+  local expected=(c>>24)&255
+  local result=event(d,33,at,0,0,0,nilptr)
+  if result==0 and ((c>>10)&63)~=9 and d.slot~=expected then return poison(d,-5) end
+  return result
+end
+local function drift_usb_close(d: *USB): int32 <cexport,codename 'drift_usb_close'>
+  if d==nilptr or d.hw==nilptr then return -22 end
+  if d.arena.data==nilptr then d.state=0; return 0 end
+  if stop(d)~=0 then return -110 end
+  hw.release(d.hw,&d.arena)
+  d.arena.data=nilptr; d.state=0
+  return 0
+end
+local function drift_usb_open(d: *USB,h: *hw.Bus,region: uint32): int32 <cexport,codename 'drift_usb_open'>
+  if d==nilptr or hw.valid(h)==0 then return -22 end
+  -- Opening requires a fresh/closed instance; never silently lose live DMA.
+  if d.state~=0 then return -16 end
+  d.hw=h; d.region=region; d.slot=0; d.port=0; d.kind=0; d.error=0
+  d.device_context=20480; d.route=0; d.parent_slot=0; d.parent_port=0; d.hub_speed=0; d.config_index=0
+  d.op=uint32(hw.read(h,region,0,1))
+  if d.op<0x20 or d.op>0x80 then return -95 end
+  local version=rd(d,0)>>16
+  if version<0x96 or version>0x120 then return -95 end
+  local hcs=rd(d,4)
+  d.ports=hcs>>24
+  if d.ports==0 or (hcs&255)==0 then return -95 end
+  local hcc=rd(d,0x10)
+  d.context_size=32
+  if (hcc&4)~=0 then d.context_size=64 end
+  local scratch_word=rd(d,8)
+  local scratch=((scratch_word>>27)&31)|(((scratch_word>>21)&31)<<5)
+  local arena_size: uint32=262144
+  if scratch~=0 then arena_size=(270336+scratch*4096+65535)&~65535_u32 end
+  d.runtime=rd(d,0x18)&~31_u32; d.doorbells=rd(d,0x14)&~3_u32
+  if d.runtime<0x20 or d.runtime>0x100000 or d.doorbells<0x20 or d.doorbells>0x100000 then return -95 end
+  -- A platform must finish firmware ownership before binding the controller.
+  if stop(d)~=0 then return -110 end
+  wr(d,d.op,2)
+  if waitreg(d,d.op,2,0)~=0 or waitreg(d,d.op+4,1<<11,0)~=0 then return -110 end
+  if (rd(d,d.op+8)&1)==0 then d.state=0; return -95 end
+  if hw.alloc(h,arena_size,65536,&d.arena)~=0 then d.state=0; return -12 end
+  if d.arena.data==nilptr or d.arena.size<arena_size or (d.arena.address&65535)~=0 or
+     d.arena.address>0xffffffffffffffff_u64-uint64(arena_size) or
+     ((hcc&1)==0 and (d.arena.address>0xffffffff_u64 or uint64(arena_size)>0x100000000_u64-d.arena.address)) then
+    if d.arena.data~=nilptr then hw.release(h,&d.arena) end
+    d.arena.data=nilptr; d.state=0; return -22
+  end
+  clear(d,0,arena_size)
+  for i: uint32=0,31 do d.ring_offset[i]=0; d.ring_index[i]=0; d.ring_cycle[i]=1; d.pending_count[i]=0; d.completion[i]=0; d.halted[i]=0 end
+  d.ring_offset[0]=4096; d.ring_offset[1]=24576
+  d.event_index=0; d.event_cycle=1; d.tag=0; d.blocks=0; d.sector_size=0
+  put64(d.arena.data,12288,d.arena.address+8192); put(d.arena.data,12296,256)
+  if scratch~=0 then
+    put64(d.arena.data,0,d.arena.address+262144)
+    for i: uint32=0,<scratch do put64(d.arena.data,262144+i*8,d.arena.address+270336+i*4096) end
+  end
+  sync(d,0,arena_size,1)
+  wr64(d,d.op+0x30,d.arena.address)
+  wr64(d,d.op+0x18,d.arena.address+4096|1)
+  local slots: uint32=1
+  if (hcs&255)>=2 then slots=2 end
+  wr(d,d.op+0x38,slots)
+  wr(d,d.runtime+0x28,1); wr64(d,d.runtime+0x30,d.arena.address+12288)
+  wr64(d,d.runtime+0x38,d.arena.address+8192)
+  wr(d,d.runtime+0x20,0)
+  wr(d,d.op,1)
+  if waitreg(d,d.op+4,1,0)~=0 then return poison(d,-110) end
+  d.state=1
+  return 0
+end
+local function ready(d: *USB): boolean return d~=nilptr and d.state==1 and d.slot~=0 end
+local function drift_usb_control(d: *USB,request_type: uint8,request: uint8,value: uint16,index: uint16,buffer: *[0]uint8,length: uint32,received: *uint32): int32 <cexport,codename 'drift_usb_control'>
+  if not ready(d) or received==nilptr or length>16384 or (length>0 and buffer==nilptr) then return -22 end
+  $received=0
+  local input=(request_type&128)~=0
+  if not input then for i: uint32=0,<length do d.arena.data[65536+i]=buffer[i] end end
+  if input then sync(d,65536,length,3) else sync(d,65536,length,1) end
+  local setup=uint64(request_type)|uint64(request)<<8|uint64(value)<<16|uint64(index)<<32|uint64(length)<<48
+  local transfer: uint32=0
+  if length>0 then if input then transfer=3 else transfer=2 end end
+  enqueue(d,1,setup,8,2<<10|64|transfer<<16)
+  local data_at: uint64=0
+  if length>0 then
+    local direction: uint32=0
+    if input then direction=1<<16 end
+    data_at=enqueue(d,1,d.arena.address+65536,length,3<<10|direction|4)
+  end
+  local direction: uint32=1<<16
+  if input and length>0 then direction=0 end
+  local last=enqueue(d,1,0,0,4<<10|direction|32)
+  wr(d,d.doorbells+d.slot*4,1)
+  local result=event(d,32,last,1,length,data_at,received)
+  if result~=0 then return result end
+  if input then
+    sync(d,65536,$received,2)
+    for i: uint32=0,<$received do buffer[i]=d.arena.data[65536+i] end
+  end
+  return 0
+end
+local function drift_usb_transfer(d: *USB,endpoint: uint8,buffer: *[0]uint8,length: uint32,received: *uint32): int32 <cexport,codename 'drift_usb_transfer'>
+  local ep=uint32(endpoint&15)*2
+  if (endpoint&128)~=0 then ep=ep+1 end
+  if not ready(d) or received==nilptr or ep<2 or ep>31 or d.ring_offset[ep]==0 or length>16384 or (length>0 and buffer==nilptr) or (length==0 and (endpoint&128)~=0) then return -22 end
+  $received=0
+  local input=(endpoint&128)~=0
+  local last: uint64
+  local data_offset=81920+((d.ring_offset[ep]-28672)//4096)*16384
+  if d.pending_count[ep]~=0 then
+    if d.pending_count[ep]~=length then return -16 end
+    last=d.pending_pointer[ep]
+  else
+    if not input then for i: uint32=0,<length do d.arena.data[data_offset+i]=buffer[i] end end
+    if input then sync(d,data_offset,length,3) else sync(d,data_offset,length,1) end
+    last=enqueue(d,ep,d.arena.address+data_offset,length,1<<10|32|4)
+    d.pending_count[ep]=length; d.pending_pointer[ep]=last
+    wr(d,d.doorbells+d.slot*4,ep)
+  end
+  local result=event(d,32,last,ep,length,last,received)
+  if result~=-11 then d.pending_count[ep]=0 end
+  if result~=0 then return result end
+  if input then
+    sync(d,data_offset,$received,2)
+    for i: uint32=0,<$received do buffer[i]=d.arena.data[data_offset+i] end
+  end
+  return 0
+end
+local function drift_usb_recover(d: *USB,endpoint: uint8): int32 <cexport,codename 'drift_usb_recover'>
+  local ep=uint32(endpoint&15)*2
+  if (endpoint&128)~=0 then ep=ep+1 end
+  if not ready(d) or ep<2 or ep>31 or d.ring_offset[ep]==0 then return -22 end
+  if d.halted[ep]==0 then return 0 end
+  local result=command(d,0,14<<10|ep<<16|d.slot<<24)
+  if result~=0 then return result end
+  local p=d.arena.address+d.ring_offset[ep]+d.ring_index[ep]*16|uint64(d.ring_cycle[ep])
+  result=command(d,p,16<<10|ep<<16|d.slot<<24)
+  if result==0 then d.halted[ep]=0; d.pending_count[ep]=0; d.completion[ep]=0 end
+  return result
+end
+local function little16(p: *[0]uint8,o: uint32): uint32 return uint32(p[o])|uint32(p[o+1])<<8 end
+local function enumerate(d: *USB): int32
+  local result=command(d,0,9<<10)
+  if result~=0 then return result end
+  if d.slot==0 or d.slot>2 or (d.parent_slot==0 and d.slot~=1) or d.slot==d.parent_slot then return poison(d,-5) end
+  put64(d.arena.data,d.slot*8,d.arena.address+d.device_context)
+  clear(d,16384,4096)
+  put(d.arena.data,16388,3)
+  local slot=16384+d.context_size
+  put(d.arena.data,slot,d.route|d.speed<<20|1<<27)
+  put(d.arena.data,slot+4,d.port<<16)
+  if d.parent_slot~=0 and d.hub_speed==3 and d.speed~=3 then
+    put(d.arena.data,slot+8,d.parent_slot|d.parent_port<<8)
+  end
+  local ep=slot+d.context_size
+  d.max_packet=8
+  if d.speed==3 then d.max_packet=64 end
+  put(d.arena.data,ep+4,3<<1|4<<3|d.max_packet<<16)
+  put64(d.arena.data,ep+8,d.arena.address+d.ring_offset[1]|1)
+  put(d.arena.data,ep+16,8)
+  sync(d,0,8*(d.slot+1),1); sync(d,16384,4096,1)
+  result=command(d,d.arena.address+16384,11<<10|d.slot<<24)
+  if result~=0 then return result end
+  local data: [1024]uint8
+  local count: uint32=0
+  result=drift_usb_control(d,128,6,0x100,0,&data[0],8,&count)
+  if result~=0 then return result end
+  if count~=8 or data[0]~=18 or data[1]~=1 then return poison(d,-5) end
+  local packet=uint32(data[7])
+  if packet~=8 and packet~=16 and packet~=32 and packet~=64 then return poison(d,-95) end
+  if packet~=d.max_packet then
+    d.max_packet=packet
+    clear(d,16384,4096); put(d.arena.data,16388,2)
+    put(d.arena.data,16384+2*d.context_size+4,3<<1|4<<3|packet<<16)
+    sync(d,16384,4096,1)
+    result=command(d,d.arena.address+16384,13<<10|d.slot<<24)
+    if result~=0 then return result end
+  end
+  result=drift_usb_control(d,128,6,0x100,0,&data[0],18,&count)
+  if result~=0 then return result end
+  if count~=18 or data[17]==0 then return poison(d,-5) end
+  if d.config_index>=uint32(data[17]) then return poison(d,-95) end
+  result=drift_usb_control(d,128,6,uint16(0x200|d.config_index),0,&data[0],9,&count)
+  if result~=0 then return result end
+  if count~=9 or data[0]~=9 or data[1]~=2 then return poison(d,-5) end
+  local total=little16(&data[0],2)
+  if total<9 or total>1024 or data[5]==0 then return poison(d,-95) end
+  result=drift_usb_control(d,128,6,uint16(0x200|d.config_index),0,&d.config[0],total,&count)
+  if result~=0 then return result end
+  if count~=total then return poison(d,-5) end
+  d.total_config=total; d.configuration=uint32(d.config[5]); d.kind=4
+  d.endpoint_in=0; d.endpoint_out=0
+  -- Configure all alternate-zero bulk/interrupt endpoints (at most eight).
+  clear(d,16384,4096)
+  sync(d,d.device_context,d.context_size,2)
+  for i: uint32=0,<d.context_size do d.arena.data[16384+d.context_size+i]=d.arena.data[d.device_context+i] end
+  local mask: uint32=1
+  local highest: uint32=1
+  local rings: uint32=0
+  local selected: boolean=false
+  local current: boolean=false
+  local alt: uint32=0
+  local at: uint32=9
+  while at<total do
+    if total-at<2 then return poison(d,-5) end
+    local n=uint32(d.config[at]); local kind=uint32(d.config[at+1])
+    if n<2 or n>total-at then return poison(d,-5) end
+    if kind==4 then
+      if n<9 then return poison(d,-5) end
+      alt=uint32(d.config[at+3]); current=false
+      if alt==0 and not selected then
+        local class=uint32(d.config[at+5]); local sub=uint32(d.config[at+6]); local protocol=uint32(d.config[at+7])
+        if class==3 and sub==1 and (protocol==1 or protocol==2) then d.kind=protocol; selected=true; current=true
+        elseif class==8 and sub==6 and protocol==0x50 then d.kind=3; selected=true; current=true
+        elseif class==9 and protocol<=1 then d.kind=5; selected=true; current=true end
+        if current then d.interface_number=uint32(d.config[at+2]) end
+      end
+    elseif kind==5 and alt==0 then
+      if n<7 or rings==8 then return poison(d,-95) end
+      local address=uint32(d.config[at+2]); local attributes=uint32(d.config[at+3])&3
+      local packet=little16(&d.config[0],at+4)
+      local endpoint=(address&15)*2
+      local input=(address&128)~=0
+      if input then endpoint=endpoint+1 end
+      if endpoint<2 or (address&0x70)~=0 or d.ring_offset[endpoint]~=0 or packet==0 or packet>1024 or (attributes~=2 and attributes~=3) then return poison(d,-95) end
+      local base=28672+rings*4096
+      rings=rings+1; d.ring_offset[endpoint]=base
+      local interval: uint32=0
+      if attributes==3 then
+        local raw=uint32(d.config[at+6])
+        if raw==0 then return poison(d,-95) end
+        if d.speed==3 then
+          if raw>16 then return poison(d,-95) end
+          interval=raw-1
+        else
+          interval=3; local v: uint32=1
+          while v<raw do v=v<<1; interval=interval+1 end
+        end
+      end
+      local etype=attributes
+      if input then etype=etype+4 end
+      local context=16384+(endpoint+1)*d.context_size
+      put(d.arena.data,context,interval<<16)
+      put(d.arena.data,context+4,3<<1|etype<<3|packet<<16)
+      put64(d.arena.data,context+8,d.arena.address+base|1)
+      local metrics=packet
+      if attributes==3 then metrics=metrics|(packet<<16) end
+      put(d.arena.data,context+16,metrics)
+      mask=mask|(1_u32<<endpoint)
+      if endpoint>highest then highest=endpoint end
+      if current then
+        if input then d.endpoint_in=address else d.endpoint_out=address end
+      end
+    end
+    at=at+n
+  end
+  put(d.arena.data,16388,mask)
+  local slotflags=get(d.arena.data,16384+d.context_size)
+  put(d.arena.data,16384+d.context_size,(slotflags&0x07ffffff)|(highest<<27))
+  sync(d,16384,4096,1)
+  if rings~=0 then
+    result=command(d,d.arena.address+16384,12<<10|d.slot<<24)
+    if result~=0 then return result end
+  end
+  result=drift_usb_control(d,0,9,uint16(d.configuration),0,nilptr,0,&count)
+  if result~=0 then return result end
+  if d.kind==1 or d.kind==2 then
+    if d.endpoint_in==0 then return poison(d,-95) end
+    result=drift_usb_control(d,0x21,11,0,uint16(d.interface_number),nilptr,0,&count)
+    if result~=0 then return result end
+  elseif d.kind==3 then
+    if d.endpoint_in==0 or d.endpoint_out==0 then return poison(d,-95) end
+  end
+  return 0
+end
+local function attach_root(d: *USB,port: uint32,index: uint32): int32
+  if d==nilptr or d.state~=1 or d.slot~=0 or port>d.ports or index>255 then return -22 end
+  d.config_index=index
+  if port==0 then
+    for i: uint32=1,d.ports do if (rd(d,d.op+0x400+(i-1)*16)&1)~=0 then port=i; break end end
+  end
+  if port==0 then return -19 end
+  local portreg=d.op+0x400+(port-1)*16
+  local value=rd(d,portreg)
+  if (value&1)==0 then return -19 end
+  if (value&2)==0 then
+    wr(d,portreg,(value&0xe00)|0x210)
+    if waitreg(d,portreg,16,0)~=0 then return -110 end
+    value=rd(d,portreg)
+  end
+  d.speed=(value>>10)&15
+  if (value&3)~=3 or d.speed==0 or d.speed>3 then return -95 end
+  d.port=port
+  return enumerate(d)
+end
+local function drift_usb_attach(d: *USB,port: uint32): int32 <cexport,codename 'drift_usb_attach'> return attach_root(d,port,0) end
+local function drift_usb_attach_config(d: *USB,port: uint32,index: uint32): int32 <cexport,codename 'drift_usb_attach_config'> return attach_root(d,port,index) end
+local function drift_usb_hid(d: *USB,report: *[0]uint8,capacity: uint32,received: *uint32): int32 <cexport,codename 'drift_usb_hid'>
+  if not ready(d) or (d.kind~=1 and d.kind~=2) then return -22 end
+  local n: uint32=8
+  if d.kind==2 then n=3 end
+  if capacity<n then return -22 end
+  local result=drift_usb_transfer(d,uint8(d.endpoint_in),report,n,received)
+  if result==0 and $received~=n then return -5 end
+  return result
+end
+local function be32(p: *[0]uint8,o: uint32): uint32
+  return uint32(p[o])<<24|uint32(p[o+1])<<16|uint32(p[o+2])<<8|uint32(p[o+3])
+end
+local function big32(p: *[0]uint8,o: uint32,v: uint32)
+  for i: uint32=0,3 do p[o+i]=uint8((v>>((3-i)*8))&255) end
+end
+local function storage_reset(d: *USB): int32
+  local n: uint32=0
+  local e=drift_usb_control(d,0x21,0xff,0,uint16(d.interface_number),nilptr,0,&n)
+  if e~=0 then return e end
+  e=drift_usb_control(d,2,1,0,uint16(d.endpoint_in),nilptr,0,&n)
+  if e~=0 then return e end
+  e=drift_usb_control(d,2,1,0,uint16(d.endpoint_out),nilptr,0,&n)
+  if e~=0 then return e end
+  e=drift_usb_recover(d,uint8(d.endpoint_in))
+  if e~=0 then return e end
+  return drift_usb_recover(d,uint8(d.endpoint_out))
+end
+local function bot(d: *USB,command_bytes: *[0]uint8,command_length: uint32,data: *[0]uint8,length: uint32,input: boolean): int32
+  if not ready(d) or d.kind~=3 or command_length==0 or command_length>16 or length>16384 then return -22 end
+  local wrapper: [31]uint8
+  local status: [13]uint8
+  for i: uint32=0,30 do wrapper[i]=0 end
+  d.tag=d.tag+1
+  if d.tag==0 then d.tag=1 end
+  put(&wrapper[0],0,0x43425355); put(&wrapper[0],4,d.tag); put(&wrapper[0],8,length)
+  if input then wrapper[12]=128 end
+  wrapper[14]=uint8(command_length)
+  for i: uint32=0,<command_length do wrapper[15+i]=command_bytes[i] end
+  local got: uint32=0
+  local result=drift_usb_transfer(d,uint8(d.endpoint_out),&wrapper[0],31,&got)
+  if result~=0 or got~=31 then if d.state==1 then storage_reset(d) end; return -5 end
+  if length>0 then
+    local endpoint=d.endpoint_out
+    if input then endpoint=d.endpoint_in end
+    result=drift_usb_transfer(d,uint8(endpoint),data,length,&got)
+    if result~=0 then if d.state==1 then storage_reset(d) end; return result end
+    if got~=length then storage_reset(d); return -5 end
+  end
+  result=drift_usb_transfer(d,uint8(d.endpoint_in),&status[0],13,&got)
+  if result~=0 then if d.state==1 then storage_reset(d) end; return result end
+  if got~=13 or get(&status[0],0)~=0x53425355 or get(&status[0],4)~=d.tag or get(&status[0],8)~=0 or status[12]>1 then
+    storage_reset(d); return -5
+  end
+  if status[12]~=0 then return -5 end
+  return 0
+end
+local function drift_usb_storage_info(d: *USB,blocks: *uint64,sector_size: *uint32): int32 <cexport,codename 'drift_usb_storage_info'>
+  if not ready(d) or blocks==nilptr or sector_size==nilptr or d.kind~=3 then return -22 end
+  local command_bytes: [10]uint8
+  local reply: [18]uint8
+  for i: uint32=0,9 do command_bytes[i]=0 end
+  command_bytes[0]=0x25
+  local result=bot(d,&command_bytes[0],10,&reply[0],8,true)
+  if result~=0 and d.state==1 then
+    command_bytes[0]=3; command_bytes[4]=18
+    bot(d,&command_bytes[0],6,&reply[0],18,true)
+    command_bytes[0]=0x25; command_bytes[4]=0
+    result=bot(d,&command_bytes[0],10,&reply[0],8,true)
+  end
+  if result~=0 then return result end
+  local last=be32(&reply[0],0); local bytes=be32(&reply[0],4)
+  if last==0xffffffff or (bytes~=512 and bytes~=4096) then return -95 end
+  d.blocks=uint64(last)+1; d.sector_size=bytes
+  $blocks=d.blocks; $sector_size=bytes
+  return 0
+end
+local function storage_io(d: *USB,lba: uint64,count: uint32,data: *[0]uint8,write: boolean): int32
+  if not ready(d) or d.kind~=3 or d.sector_size==0 or data==nilptr or count==0 or count>16384//d.sector_size or lba>=d.blocks or uint64(count)>d.blocks-lba or lba>0xffffffff then return -22 end
+  local command_bytes: [10]uint8
+  for i: uint32=0,9 do command_bytes[i]=0 end
+  command_bytes[0]=0x28
+  if write then command_bytes[0]=0x2a end
+  big32(&command_bytes[0],2,uint32(lba)); command_bytes[7]=uint8(count>>8); command_bytes[8]=uint8(count&255)
+  return bot(d,&command_bytes[0],10,data,count*d.sector_size,not write)
+end
+local function drift_usb_storage_read(d: *USB,lba: uint64,count: uint32,data: *[0]uint8): int32 <cexport,codename 'drift_usb_storage_read'> return storage_io(d,lba,count,data,false) end
+local function drift_usb_storage_write(d: *USB,lba: uint64,count: uint32,data: *[0]uint8): int32 <cexport,codename 'drift_usb_storage_write'> return storage_io(d,lba,count,data,true) end
+local function drift_usb_storage_flush(d: *USB): int32 <cexport,codename 'drift_usb_storage_flush'>
+  local command_bytes: [10]uint8
+  for i: uint32=0,9 do command_bytes[i]=0 end
+  command_bytes[0]=0x35
+  return bot(d,&command_bytes[0],10,nilptr,0,false)
+end
+-- Change an interface without handing endpoint contexts to the OS. Only
+-- bulk/interrupt alternate settings present in the device descriptor are used.
+local function drift_usb_set_interface(d: *USB,number: uint8,alternate: uint8): int32 <cexport,codename 'drift_usb_set_interface'>
+  if not ready(d) then return -22 end
+  for i: uint32=2,31 do if d.pending_count[i]~=0 then return -16 end end
+  local found: boolean=false
+  local current: boolean=false
+  local target: boolean=false
+  local old_mask: uint32=0
+  local new_mask: uint32=0
+  local at: uint32=9
+  -- Retire endpoint windows belonging to any alternate of this interface.
+  while at<d.total_config do
+    if d.total_config-at<2 then return -5 end
+    local n=uint32(d.config[at]); local kind=uint32(d.config[at+1])
+    if n<2 or n>d.total_config-at then return -5 end
+    if kind==4 then
+      if n<9 then return -5 end
+      current=d.config[at+2]==number
+      target=current and d.config[at+3]==alternate
+      if target then found=true end
+    elseif kind==5 and current then
+      if n<7 then return -5 end
+      local address=uint32(d.config[at+2]); local ep=(address&15)*2
+      if (address&128)~=0 then ep=ep+1 end
+      if ep<2 or ep>31 then return -95 end
+      if d.ring_offset[ep]~=0 then old_mask=old_mask|(1_u32<<ep) end
+    end
+    at=at+n
+  end
+  if not found then return -95 end
+  clear(d,16384,4096)
+  sync(d,d.device_context,d.context_size,2)
+  for i: uint32=0,<d.context_size do d.arena.data[16384+d.context_size+i]=d.arena.data[d.device_context+i] end
+  -- Reuse a retired ring only after Configure Endpoint has dropped it. No
+  -- transfer is outstanding, so writing these idle software rings is safe.
+  for ep: uint32=2,31 do
+    if (old_mask&(1_u32<<ep))~=0 then d.ring_offset[ep]=0 end
+  end
+  current=false; at=9
+  while at<d.total_config do
+    local n=uint32(d.config[at]); local kind=uint32(d.config[at+1])
+    if kind==4 then current=d.config[at+2]==number and d.config[at+3]==alternate
+    elseif kind==5 and current then
+      local address=uint32(d.config[at+2]); local endpoint=(address&15)*2
+      local input=(address&128)~=0
+      if input then endpoint=endpoint+1 end
+      local attributes=uint32(d.config[at+3])&3
+      local packet=little16(&d.config[0],at+4)
+      if (address&0x70)~=0 or d.ring_offset[endpoint]~=0 or packet==0 or packet>1024 or (attributes~=2 and attributes~=3) then return poison(d,-95) end
+      local base: uint32=0
+      for i: uint32=0,7 do
+        local candidate=28672+i*4096
+        local used: boolean=false
+        for ep: uint32=2,31 do if d.ring_offset[ep]==candidate then used=true end end
+        if not used then base=candidate; break end
+      end
+      if base==0 then return poison(d,-95) end
+      d.ring_offset[endpoint]=base; d.ring_index[endpoint]=0; d.ring_cycle[endpoint]=1
+      clear(d,base,4096); sync(d,base,4096,1)
+      local interval: uint32=0
+      if attributes==3 then
+        local raw=uint32(d.config[at+6]); if raw==0 then return poison(d,-95) end
+        if d.speed==3 then if raw>16 then return poison(d,-95) end; interval=raw-1
+        else interval=3; local v: uint32=1; while v<raw do v=v<<1; interval=interval+1 end end
+      end
+      local etype=attributes; if input then etype=etype+4 end
+      local context=16384+(endpoint+1)*d.context_size
+      put(d.arena.data,context,interval<<16)
+      put(d.arena.data,context+4,3<<1|etype<<3|packet<<16)
+      put64(d.arena.data,context+8,d.arena.address+base|1)
+      local metrics=packet
+      if attributes==3 then metrics=metrics|(packet<<16) end
+      put(d.arena.data,context+16,metrics)
+      new_mask=new_mask|(1_u32<<endpoint)
+    end
+    at=at+n
+  end
+  local highest: uint32=1
+  for ep: uint32=2,31 do if d.ring_offset[ep]~=0 then highest=ep end end
+  local slotflags=get(d.arena.data,16384+d.context_size)
+  put(d.arena.data,16384+d.context_size,(slotflags&0x07ffffff)|(highest<<27))
+  put(d.arena.data,16384,old_mask); put(d.arena.data,16388,new_mask|1)
+  sync(d,16384,4096,1)
+  local result=command(d,d.arena.address+16384,12<<10|d.slot<<24)
+  if result~=0 then return result end
+  local got: uint32=0
+  return drift_usb_control(d,1,11,uint16(alternate),uint16(number),nilptr,0,&got)
+end
+-- Keep the hub's slot/EP0 alive, then select one child in a second slot. The
+-- hub's unused interrupt endpoint is dropped before its ring is recycled.
+local function drift_usb_hub_child(d: *USB,hub_port: uint8,speed: uint8,hub_ports: uint8,tt_think: uint8): int32 <cexport,codename 'drift_usb_hub_child'>
+  if not ready(d) or d.kind~=5 or d.parent_slot~=0 or hub_port==0 or hub_port>15 or hub_ports==0 or hub_port>hub_ports or speed<1 or speed>3 or tt_think>3 then return -22 end
+  if (rd(d,4)&255)<2 then return -95 end
+  for i: uint32=2,31 do if d.pending_count[i]~=0 then return -16 end end
+  local parent=d.slot
+  clear(d,16384,4096); sync(d,d.device_context,d.context_size,2)
+  for i: uint32=0,<d.context_size do d.arena.data[16384+d.context_size+i]=d.arena.data[d.device_context+i] end
+  local slot=16384+d.context_size
+  put(d.arena.data,slot,(get(d.arena.data,slot)&0x07ffffff)|(1<<26)|(1<<27))
+  put(d.arena.data,slot+4,(get(d.arena.data,slot+4)&0x00ffffff)|uint32(hub_ports)<<24)
+  put(d.arena.data,slot+8,uint32(tt_think)<<16)
+  put(d.arena.data,16388,1)
+  sync(d,16384,4096,1)
+  local result=command(d,d.arena.address+16384,13<<10|parent<<24)
+  if result~=0 then return result end
+  local drop: uint32=0
+  for ep: uint32=2,31 do if d.ring_offset[ep]~=0 then drop=drop|(1_u32<<ep) end end
+  put(d.arena.data,16384,drop); put(d.arena.data,16388,1)
+  sync(d,16384,4096,1)
+  result=command(d,d.arena.address+16384,12<<10|parent<<24)
+  if result~=0 then return result end
+  for ep: uint32=2,31 do d.ring_offset[ep]=0; d.ring_index[ep]=0; d.ring_cycle[ep]=1; d.pending_count[ep]=0; d.completion[ep]=0 end
+  d.hub_speed=d.speed; d.speed=uint32(speed); d.parent_slot=parent; d.parent_port=uint32(hub_port)
+  d.route=uint32(hub_port); d.slot=0; d.config_index=0; d.device_context=221184; d.ring_offset[1]=225280
+  d.ring_index[1]=0; d.ring_cycle[1]=1
+  clear(d,221184,8192); sync(d,221184,8192,1)
+  return enumerate(d)
+end

@@ -1,0 +1,234 @@
+-- Common OS-facing storage and Ethernet operations. SPDX-License-Identifier: MIT
+## pragmas.nogc = true
+## pragmas.noentrypoint = true
+## pragmas.nochecks = true
+## pragmas.nocstaticassert = true
+## pragmas.unitname = 'drift_io'
+local Block: type <cimport 'drift_block',cinclude '"drift_io.h"'> = @record{
+  kind:uint32, driver:pointer, blocks:uint64, sector_size:uint32, max_sectors:uint32, completed:uint32
+}
+local Net: type <cimport 'drift_net',cinclude '"drift_io.h"'> = @record{
+  kind:uint32, driver:pointer, mac:[6]uint8, max_frame:uint32
+}
+-- Imported records name the fields used here. Their native C declarations
+-- remain the layout authority; this layer only borrows pointers to them.
+local Virtio: type <cimport 'drift_virtio',cinclude '"drift_virtio.h"'> = @record{
+  capacity:uint64, device_id:uint32, state:uint32, mac:[6]uint8
+}
+local NVMe: type <cimport 'drift_nvme',cinclude '"drift_nvme.h"'> = @record{
+  blocks:uint64, block_size:uint32, state:uint32
+}
+local AHCI: type <cimport 'drift_ahci',cinclude '"drift_ahci.h"'> = @record{
+  sectors:uint64, sector_size:uint32, state:int32
+}
+local USB: type <cimport 'drift_usb',cinclude '"drift_usb.h"'> = @record{
+  blocks:uint64, sector_size:uint32, state:uint32, slot:uint32, kind:uint32
+}
+local Ethernet: type <cimport 'drift_ethernet',cinclude '"drift_ethernet.h"'> = @record{
+  state:int32, mac:[6]uint8
+}
+local CDC: type <cimport 'drift_usb_cdc',cinclude '"drift_usb_classes.h"'> = @record{
+  device:*USB, kind:uint32, maximum_segment:uint32, state:uint32, mac:[6]uint8
+}
+local function vb(d:*Virtio,lba:uint64,n:uint32,p:*[0]uint8,w:int32):int32 <cimport 'drift_virtio_block',cinclude '"drift_virtio.h"'> end
+local function vf(d:*Virtio):int32 <cimport 'drift_virtio_flush',cinclude '"drift_virtio.h"'> end
+local function nr(d:*NVMe,lba:uint64,n:uint32,p:*[0]uint8):int32 <cimport 'drift_nvme_read',cinclude '"drift_nvme.h"'> end
+local function nw(d:*NVMe,lba:uint64,n:uint32,p:*[0]uint8):int32 <cimport 'drift_nvme_write',cinclude '"drift_nvme.h"'> end
+local function nf(d:*NVMe):int32 <cimport 'drift_nvme_flush',cinclude '"drift_nvme.h"'> end
+local function ar(d:*AHCI,lba:uint64,n:uint32,p:*[0]uint8):int32 <cimport 'drift_ahci_read',cinclude '"drift_ahci.h"'> end
+local function aw(d:*AHCI,lba:uint64,n:uint32,p:*[0]uint8):int32 <cimport 'drift_ahci_write',cinclude '"drift_ahci.h"'> end
+local function af(d:*AHCI):int32 <cimport 'drift_ahci_flush',cinclude '"drift_ahci.h"'> end
+local function ui(d:*USB,n:*uint64,size:*uint32):int32 <cimport 'drift_usb_storage_info',cinclude '"drift_usb.h"'> end
+local function ur(d:*USB,lba:uint64,n:uint32,p:*[0]uint8):int32 <cimport 'drift_usb_storage_read',cinclude '"drift_usb.h"'> end
+local function uw(d:*USB,lba:uint64,n:uint32,p:*[0]uint8):int32 <cimport 'drift_usb_storage_write',cinclude '"drift_usb.h"'> end
+local function uf(d:*USB):int32 <cimport 'drift_usb_storage_flush',cinclude '"drift_usb.h"'> end
+local function vs(d:*Virtio,p:*[0]uint8,n:uint32):int32 <cimport 'drift_virtio_send',cinclude '"drift_virtio.h"'> end
+local function vr(d:*Virtio,p:*[0]uint8,n:uint32):int32 <cimport 'drift_virtio_receive',cinclude '"drift_virtio.h"'> end
+local function es(d:*Ethernet,p:*[0]uint8,n:uint32):int32 <cimport 'drift_eth_tx',cinclude '"drift_ethernet.h"'> end
+local function er(d:*Ethernet,p:*[0]uint8,n:uint32,got:*uint32):int32 <cimport 'drift_eth_rx',cinclude '"drift_ethernet.h"'> end
+local function cs(d:*CDC,p:*[0]uint8,n:uint32):int32 <cimport 'drift_usb_cdc_write',cinclude '"drift_usb_classes.h"'> end
+local function cr(d:*CDC,p:*[0]uint8,n:uint32):int32 <cimport 'drift_usb_cdc_read',cinclude '"drift_usb_classes.h"'> end
+
+local function geometry(blocks:uint64,size:uint32):boolean
+  return blocks~=0 and size>=512 and size<=4096 and (size&(size-1))==0
+end
+local function normalized(status:int32):int32
+  if status>0 then return -1004 end
+  return status
+end
+local function drift_block_bind(d:*Block,kind:uint32,driver:pointer):int32 <cexport,codename 'drift_block_bind'>
+  if d==nilptr then return -1000 end
+  d.kind,d.driver,d.blocks,d.sector_size,d.max_sectors,d.completed=0,nilptr,0,0,0,0
+  if driver==nilptr then return -1000 end
+  local blocks:uint64=0
+  local size:uint32=0
+  local limit:uint32=0
+  if kind==1 then
+    local p=(@*Virtio)(driver)
+    if p.state~=2 or p.device_id~=2 then return -1001 end
+    blocks,size,limit=p.capacity,512,65536
+  elseif kind==2 then
+    local p=(@*NVMe)(driver)
+    if p.state~=1 then return -1001 end
+    blocks,size,limit=p.blocks,p.block_size,4096
+  elseif kind==3 then
+    local p=(@*AHCI)(driver)
+    if p.state~=1 then return -1001 end
+    blocks,size,limit=p.sectors,p.sector_size,65536
+  elseif kind==4 then
+    local p=(@*USB)(driver)
+    if p.state~=1 or p.slot==0 or p.kind~=3 then return -1001 end
+    local result=ui(p,&blocks,&size)
+    if result~=0 then return normalized(result) end
+    if p.blocks~=blocks or p.sector_size~=size then return -1004 end
+    limit=16384
+  else return -1003 end
+  if not geometry(blocks,size) or size>limit then return -1004 end
+  d.kind,d.driver,d.blocks,d.sector_size,d.max_sectors=kind,driver,blocks,size,limit//size
+  return 0
+end
+local function block_live(d:*Block):boolean
+  if d.driver==nilptr or not geometry(d.blocks,d.sector_size) then return false end
+  if d.kind==1 then
+    local p=(@*Virtio)(d.driver)
+    return p.state==2 and p.device_id==2 and p.capacity==d.blocks and d.sector_size==512 and d.max_sectors==128
+  elseif d.kind==2 then
+    local p=(@*NVMe)(d.driver)
+    return p.state==1 and p.blocks==d.blocks and p.block_size==d.sector_size and d.max_sectors==4096//d.sector_size
+  elseif d.kind==3 then
+    local p=(@*AHCI)(d.driver)
+    return p.state==1 and p.sectors==d.blocks and p.sector_size==d.sector_size and d.max_sectors==65536//d.sector_size
+  elseif d.kind==4 then
+    local p=(@*USB)(d.driver)
+    return p.state==1 and p.slot~=0 and p.kind==3 and p.blocks==d.blocks and p.sector_size==d.sector_size and d.max_sectors==16384//d.sector_size
+  end
+  return false
+end
+local function io(d:*Block,lba:uint64,count:uint32,buffer:*[0]uint8,bytes:uint32,writing:boolean):int32
+  if d==nilptr then return -1000 end
+  d.completed=0
+  if buffer==nilptr or count==0 then return -1000 end
+  if not block_live(d) then return -1001 end
+  -- Division checks the byte product without ever overflowing it.
+  if lba>=d.blocks or uint64(count)>d.blocks-lba or count>bytes//d.sector_size then return -1002 end
+  while d.completed<count do
+    local n=count-d.completed
+    if n>d.max_sectors then n=d.max_sectors end
+    local at=lba+d.completed
+    local data=&buffer[d.completed*d.sector_size]
+    local result:int32
+    if d.kind==1 then result=vb((@*Virtio)(d.driver),at,n,data,writing and 1 or 0)
+    elseif d.kind==2 then
+      if writing then result=nw((@*NVMe)(d.driver),at,n,data) else result=nr((@*NVMe)(d.driver),at,n,data) end
+    elseif d.kind==3 then
+      if writing then result=aw((@*AHCI)(d.driver),at,n,data) else result=ar((@*AHCI)(d.driver),at,n,data) end
+    else
+      if writing then result=uw((@*USB)(d.driver),at,n,data) else result=ur((@*USB)(d.driver),at,n,data) end
+    end
+    if result~=0 then return normalized(result) end
+    d.completed=d.completed+n
+  end
+  return 0
+end
+local function drift_block_read(d:*Block,lba:uint64,count:uint32,p:*[0]uint8,bytes:uint32):int32 <cexport,codename 'drift_block_read'>
+  return io(d,lba,count,p,bytes,false)
+end
+local function drift_block_write(d:*Block,lba:uint64,count:uint32,p:*[0]uint8,bytes:uint32):int32 <cexport,codename 'drift_block_write'>
+  return io(d,lba,count,p,bytes,true)
+end
+local function drift_block_flush(d:*Block):int32 <cexport,codename 'drift_block_flush'>
+  if d==nilptr then return -1000 end
+  d.completed=0
+  if not block_live(d) then return -1001 end
+  local result:int32
+  if d.kind==1 then result=vf((@*Virtio)(d.driver))
+  elseif d.kind==2 then result=nf((@*NVMe)(d.driver))
+  elseif d.kind==3 then result=af((@*AHCI)(d.driver))
+  else result=uf((@*USB)(d.driver)) end
+  return normalized(result)
+end
+local function drift_net_bind(d:*Net,kind:uint32,driver:pointer):int32 <cexport,codename 'drift_net_bind'>
+  if d==nilptr then return -1000 end
+  d.kind,d.driver,d.max_frame=0,nilptr,0
+  for i:uint32=0,5 do d.mac[i]=0 end
+  if driver==nilptr then return -1000 end
+  local mac:*[0]uint8
+  local maximum:uint32
+  if kind==1 then
+    local p=(@*Virtio)(driver)
+    if p.state~=2 or p.device_id~=1 then return -1001 end
+    mac,maximum=&p.mac[0],2036
+  elseif kind==2 then
+    local p=(@*Ethernet)(driver)
+    if p.state~=1 then return -1001 end
+    mac,maximum=&p.mac[0],1518
+  elseif kind==3 then
+    local p=(@*CDC)(driver)
+    if p.state~=1 or p.kind~=2 or p.device==nilptr or p.device.state~=1 then return -1001 end
+    mac,maximum=&p.mac[0],p.maximum_segment
+  else return -1003 end
+  if maximum<14 or maximum>16384 or (mac[0]&1)~=0 then return -1004 end
+  local bits:uint8=0
+  for i:uint32=0,5 do bits=bits|mac[i] end
+  if bits==0 then return -1004 end
+  for i:uint32=0,5 do d.mac[i]=mac[i] end
+  d.kind,d.driver,d.max_frame=kind,driver,maximum
+  return 0
+end
+local function net_live(d:*Net):boolean
+  if d.driver==nilptr or d.max_frame<14 or d.max_frame>16384 then return false end
+  local mac:*[0]uint8
+  if d.kind==1 then
+    local p=(@*Virtio)(d.driver)
+    if p.state~=2 or p.device_id~=1 or d.max_frame~=2036 then return false end
+    mac=&p.mac[0]
+  elseif d.kind==2 then
+    local p=(@*Ethernet)(d.driver)
+    if p.state~=1 or d.max_frame~=1518 then return false end
+    mac=&p.mac[0]
+  elseif d.kind==3 then
+    local p=(@*CDC)(d.driver)
+    if p.state~=1 or p.kind~=2 or p.device==nilptr or p.device.state~=1 or d.max_frame~=p.maximum_segment then return false end
+    mac=&p.mac[0]
+  else return false end
+  for i:uint32=0,5 do if d.mac[i]~=mac[i] then return false end end
+  return true
+end
+local function drift_net_send(d:*Net,frame:*[0]uint8,bytes:uint32):int32 <cexport,codename 'drift_net_send'>
+  if d==nilptr or frame==nilptr then return -1000 end
+  if not net_live(d) then return -1001 end
+  if bytes<14 or bytes>d.max_frame then return -1002 end
+  local result:int32
+  if d.kind==1 then result=vs((@*Virtio)(d.driver),frame,bytes)
+  elseif d.kind==2 then result=es((@*Ethernet)(d.driver),frame,bytes)
+  else
+    result=cs((@*CDC)(d.driver),frame,bytes)
+    if result==int32(bytes) then return 0 end
+    if result>=0 then return -1004 end
+    return result
+  end
+  return normalized(result)
+end
+local function drift_net_receive(d:*Net,frame:*[0]uint8,capacity:uint32):int32 <cexport,codename 'drift_net_receive'>
+  if d==nilptr or frame==nilptr then return -1000 end
+  if not net_live(d) then return -1001 end
+  if capacity<d.max_frame then return -1002 end
+  local result:int32
+  if d.kind==1 then result=vr((@*Virtio)(d.driver),frame,d.max_frame)
+  elseif d.kind==2 then
+    local length:uint32=0
+    result=er((@*Ethernet)(d.driver),frame,d.max_frame,&length)
+    if result==1 then
+      if length~=0 then return -1004 end
+      return 0
+    end
+    if result>0 then return -1004 end
+    if result==0 then
+      if length<14 or length>d.max_frame or length>capacity then return -1004 end
+      return int32(length)
+    end
+    return result
+  else result=cr((@*CDC)(d.driver),frame,d.max_frame) end
+  if result>0 and (result<14 or uint32(result)>d.max_frame or uint32(result)>capacity) then return -1004 end
+  return result
+end

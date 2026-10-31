@@ -1,0 +1,107 @@
+-- USB2 hub class management. SPDX-License-Identifier: MIT
+## pragmas.nogc = true
+## pragmas.noentrypoint = true
+## pragmas.nochecks = true
+## pragmas.nocstaticassert = true
+## pragmas.unitname = 'drift_usb_hub'
+local hw = require 'drift.hw'
+local USB: type <cimport 'drift_usb', cinclude '"drift_usb.h"'> = @record{
+  hw: *hw.Bus, state: uint32, slot: uint32, kind: uint32, parent_slot: uint32
+}
+local function control(d: *USB,t: uint8,r: uint8,v: uint16,i: uint16,p: *[0]uint8,n: uint32,got: *uint32): int32 <cimport 'drift_usb_control',cinclude '"drift_usb.h"'> end
+local function child(d: *USB,p: uint8,s: uint8,n: uint8,tt: uint8): int32 <cimport 'drift_usb_hub_child',cinclude '"drift_usb.h"'> end
+local function status(d: *USB,port: uint32,out: *uint32): int32
+  local bytes: [4]uint8
+  local got: uint32=0
+  local e=control(d,0xa3,0,0,uint16(port),&bytes[0],4,&got)
+  if e~=0 then return e end
+  if got~=4 then return -5 end
+  $out=uint32(bytes[0])|uint32(bytes[1])<<8|uint32(bytes[2])<<16|uint32(bytes[3])<<24
+  return 0
+end
+local function feature(d: *USB,port: uint32,value: uint16,set: boolean): int32
+  local got: uint32=0
+  local request: uint8=1
+  if set then request=3 end
+  return control(d,0x23,request,value,uint16(port),nilptr,0,&got)
+end
+local function drift_usb_attach_hub(d: *USB,port: uint32): int32 <cexport,codename 'drift_usb_attach_hub'>
+  if d==nilptr or d.state~=1 or d.slot==0 or d.kind~=5 or d.parent_slot~=0 or hw.valid(d.hw)==0 then return -22 end
+  local descriptor: [9]uint8
+  local got: uint32=0
+  local e=control(d,0xa0,6,0x2900,0,&descriptor[0],9,&got)
+  if e~=0 then return e end
+  if got<7 or got>9 or descriptor[1]~=0x29 then return -5 end
+  local ports=uint32(descriptor[2])
+  local characteristics=uint32(descriptor[3])|uint32(descriptor[4])<<8
+  if ports==0 or ports>15 or port>ports or (characteristics&3)==3 then return -95 end
+  -- The removable bitmap is required. Some hubs (including QEMU8.2) omit
+  -- unused bytes from the obsolete PortPwrCtrlMask tail. Never accept a
+  -- truncated mandatory field or a response shorter than its declared prefix.
+  local bitmap=(ports+8)//8
+  local mandatory=7+bitmap
+  local declared=uint32(descriptor[0])
+  local prefix=declared
+  if prefix>9 then prefix=9 end
+  if declared<mandatory or declared>7+2*bitmap or got~=prefix or got<mandatory then return -5 end
+  if (characteristics&3)~=2 then
+    for i: uint32=1,ports do
+      e=feature(d,i,8,true)
+      if e~=0 then return e end
+    end
+  end
+  hw.wait(d.hw,uint32(descriptor[5])*2000)
+  if port==0 then
+    for i: uint32=1,ports do
+      local value: uint32=0
+      e=status(d,i,&value)
+      if e~=0 then return e end
+      if (value&1)~=0 then port=i; break end
+    end
+  end
+  if port==0 then return -19 end
+  -- Require a stable connection for100ms, bounded even on a chattering port.
+  local value: uint32=0
+  local debounce_start=hw.time(d.hw)
+  local stable=debounce_start
+  while true do
+    e=status(d,port,&value)
+    if e~=0 then return e end
+    if (value&1)==0 then return -19 end
+    if (value&8)~=0 then return -5 end
+    if (value&(1_u32<<16))~=0 then
+      e=feature(d,port,16,false)
+      if e~=0 then return e end
+      stable=hw.time(d.hw)
+    end
+    if hw.time(d.hw)-stable>=100000 then break end
+    if hw.time(d.hw)-debounce_start>=2000000 then return -110 end
+    hw.wait(d.hw,10000)
+  end
+  e=feature(d,port,4,true)
+  if e~=0 then return e end
+  local start=hw.time(d.hw)
+  while true do
+    e=status(d,port,&value)
+    if e~=0 then return e end
+    if (value&1)==0 then return -19 end
+    if (value&8)~=0 then return -5 end
+    if (value&0x13)==3 then break end
+    if hw.time(d.hw)-start>=1000000 then return -110 end
+    hw.wait(d.hw,10000)
+  end
+  -- Acknowledge changes while the hub still owns the controller's EP0 path.
+  for bit: uint32=0,4 do
+    if (value&(1_u32<<(16+bit)))~=0 then
+      e=feature(d,port,uint16(16+bit),false)
+      if e~=0 then return e end
+    end
+  end
+  local speed: uint8=1
+  if (value&0x200)~=0 then speed=2 end
+  if (value&0x400)~=0 then
+    if speed==2 then return -5 end
+    speed=3
+  end
+  return child(d,uint8(port),speed,uint8(ports),uint8((characteristics>>5)&3))
+end
