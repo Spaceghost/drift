@@ -8,7 +8,7 @@ temporary=$(mktemp -d "$root/build/check-linux-import.XXXXXX")
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 mkdir -p "$temporary/tools" "$temporary/bin" "$temporary/imports/linux/pcspkr"
 cp tools/import-linux.sh "$temporary/tools/"
-cp imports/linux/pcspkr/UPSTREAM imports/linux/pcspkr/SHA256SUMS "$temporary/imports/linux/pcspkr/"
+cp imports/linux/pcspkr/SOURCE imports/linux/pcspkr/SHA256SUMS "$temporary/imports/linux/pcspkr/"
 cat > "$temporary/bin/curl" <<'EOF'
 #!/bin/sh
 set -eu

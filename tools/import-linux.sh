@@ -8,7 +8,7 @@ case "${1-}" in
 esac
 [ "$#" -eq 1 ] || { echo 'unexpected arguments' >&2; exit 2; }
 root=$PWD
-revision=$(sed -n 's/^commit=//p' "$profile/UPSTREAM")
+revision=$(sed -n 's/^commit=//p' "$profile/SOURCE")
 case "$revision" in
     *[!0-9a-f]*|'') echo 'invalid upstream revision' >&2; exit 1 ;;
 esac

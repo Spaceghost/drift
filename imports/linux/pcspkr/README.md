@@ -1,7 +1,7 @@
 # Unchanged Linux PC speaker driver
 
 This opt-in experiment compiles Linux v6.18's `pcspkr.c` **without modifying
-one byte**. `UPSTREAM` pins the commit; `SHA256SUMS` covers the original source
+one byte**. `SOURCE` pins the commit; `SHA256SUMS` covers the original source
 and GPL license. The compatibility runtime is Nelua, with generated C included
 for ordinary C builds. `driver.c` supplies explicit lifecycle registration and
 a C11 atomic, non-spinning call gate. No Linux module binary is loaded.
