@@ -1,0 +1,39 @@
+-- Read-only JEDEC SPI NOR identification. SPDX-License-Identifier: MIT
+-- Authoring program: build once; its .drv module runs on every Drift host.
+local asm = require 'drift.asm'
+require 'C.arg'
+local b = asm.new(16, asm.XFER | asm.EMIT, asm.SPI)
+b:set(0, 0x9f)
+
+-- One atomic SPI transaction: write 9f, then clock three response bytes.
+b:lit(2, 0)                         -- command offset; also constant zero
+b:lit(3, 1)                         -- command length
+b:lit(4, 4)                         -- response offset
+b:lit(5, 3)                         -- response length
+b:ins(asm.IO, 2, 3, 4, 5)
+b:branch(asm.JNE, 0, 2, 'done')      -- preserve transport failure in r0
+b:branch(asm.JNE, 1, 5, 'short')
+b:ins(asm.LD8, 6, 4, 0, 0)          -- manufacturer
+b:ins(asm.LD8, 7, 4, 0, 1)          -- memory type
+b:ins(asm.LD8, 8, 4, 0, 2)          -- capacity code
+b:ins(asm.OR, 9, 6, 7, 0)
+b:ins(asm.OR, 9, 9, 8, 0)
+b:branch(asm.JEQ, 9, 2, 'invalid')
+b:ins(asm.AND, 9, 6, 7, 0)
+b:ins(asm.AND, 9, 9, 8, 0)
+b:lit(10, 255)
+b:branch(asm.JEQ, 9, 10, 'invalid')
+b:ins(asm.EVENT, 6, 7, 8, 2)
+b:branch(asm.JNE, 0, 2, 'done')      -- event sink errors remain visible
+b:lit(0, 0)
+b:branch(asm.JMP, 0, 0, 'done')
+b:mark('short')
+b:lit(0, 1)
+b:branch(asm.JMP, 0, 0, 'done')
+b:mark('invalid')
+b:lit(0, 2)
+b:mark('done')
+b:ins(asm.HALT, 0, 0, 0, 0)
+
+if C.argc ~= 2 then error('usage: jedec OUTPUT.drv') end
+b:write(C.argv[1])

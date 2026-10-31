@@ -1,0 +1,139 @@
+-- Drift's little assembler. SPDX-License-Identifier: MIT
+-- Runs when building a module; it is not linked into the driver machine.
+## pragmas.nogc = true
+require 'C.stdio'
+
+local asm: type = @record{}
+
+## local names = {'HALT','LIT','MOV','ADD','SUB','MUL','DIV','AND','OR',
+##                'XOR','SHL','SHR','LD8','ST8','LD32','ST32','JMP',
+##                'JEQ','JNE','JLT','IO','EVENT','SLEEP'}
+## for i, name in ipairs(names) do
+local asm.#|name|#: uint8 <comptime> = #[i-1]#
+## end
+
+local asm.XFER: uint32 <comptime> = 1
+local asm.EMIT: uint32 <comptime> = 2
+local asm.WAIT: uint32 <comptime> = 4
+local asm.NONE: uint32 <comptime> = 0
+local asm.STREAM: uint32 <comptime> = 1
+local asm.SPI: uint32 <comptime> = 2
+local asm.I2C: uint32 <comptime> = 3
+
+local Instruction: type = @record{op: uint8, a: uint8, b: uint8, c: uint8, imm: uint32}
+local Label: type = @record{name: string, pc: uint32}
+local Fixup: type = @record{name: string, pc: uint32}
+local asm.Builder: type = @record{
+  code: [1024]Instruction,
+  data: [4096]uint8,
+  labels: [128]Label,
+  fixups: [256]Fixup,
+  count: uint32, data_len: uint32, label_count: uint32, fixup_count: uint32,
+  memory_len: uint32, caps: uint32, bus: uint32, entry: uint32
+}
+
+local function check(ok: boolean, message: string)
+  if not ok then error(message) end
+end
+
+function asm.new(memory_len: uint32, caps: uint32, bus: uint32): asm.Builder
+  check(memory_len >= 1 and memory_len <= 4096, 'invalid driver memory size')
+  check(caps <= 7 and bus <= 3, 'invalid driver capabilities or bus')
+  check((caps & asm.XFER) == 0 or bus ~= asm.NONE, 'transfer requires a bus')
+  return (@asm.Builder){memory_len=memory_len, caps=caps, bus=bus}
+end
+
+function asm.Builder:ins(op: uint8, a: uint8, b: uint8, c: uint8, imm: uint32)
+  check(self.count < 1024, 'driver has more than 1024 instructions')
+  check(op <= asm.SLEEP and a < 16 and b < 16 and c < 16, 'invalid instruction')
+  check(op ~= asm.IO or imm < 16, 'transfer length must name a register')
+  self.code[self.count] = (@Instruction){op=op, a=a, b=b, c=c, imm=imm}
+  self.count = self.count + 1
+end
+
+function asm.Builder:lit(reg: uint8, value: uint32)
+  self:ins(asm.LIT, reg, 0, 0, value)
+end
+
+function asm.Builder:mov(dst: uint8, src: uint8)
+  self:ins(asm.MOV, dst, src, 0, 0)
+end
+
+function asm.Builder:set(offset: uint32, value: uint8)
+  check(offset < self.memory_len, 'initial data exceeds driver memory')
+  self.data[offset] = value
+  if offset >= self.data_len then self.data_len = offset + 1 end
+end
+
+local function find_label(self: *asm.Builder, name: string): int32
+  local i: uint32 = 0
+  while i < self.label_count do
+    if self.labels[i].name == name then return (@int32)(self.labels[i].pc) end
+    i = i + 1
+  end
+  return -1
+end
+
+function asm.Builder:mark(name: string)
+  check(#name > 0 and self.label_count < 128, 'invalid or excessive driver labels')
+  check(find_label(self, name) < 0, 'duplicate driver label')
+  self.labels[self.label_count] = (@Label){name=name, pc=self.count}
+  self.label_count = self.label_count + 1
+end
+
+function asm.Builder:branch(op: uint8, a: uint8, b: uint8, label: string)
+  check(op >= asm.JMP and op <= asm.JLT, 'branch requires a branch opcode')
+  check(self.fixup_count < 256, 'too many driver branches')
+  self.fixups[self.fixup_count] = (@Fixup){name=label, pc=self.count}
+  self.fixup_count = self.fixup_count + 1
+  self:ins(op, a, b, 0, 0)
+end
+
+local function put32(out: *[12320]uint8, offset: uint32, value: uint32)
+  for i: uint32 = 0, 3 do
+    out[offset+i] = (@uint8)((value >> (i*8)) & 255)
+  end
+end
+
+function asm.Builder:write(path: string)
+  check(self.count > 0 and self.entry < self.count, 'driver has no valid entry')
+  for i: uint32 = 0, < self.fixup_count do
+    local pc = find_label(self, self.fixups[i].name)
+    check(pc >= 0 and (@uint32)(pc) < self.count, 'unresolved or empty driver label')
+    self.code[self.fixups[i].pc].imm = (@uint32)(pc)
+  end
+  for i: uint32 = 0, < self.count do
+    local insn = self.code[i]
+    if insn.op >= asm.JMP and insn.op <= asm.JLT then
+      check(insn.imm < self.count, 'branch outside driver code')
+    end
+    if insn.op == asm.IO then check((self.caps & asm.XFER) ~= 0, 'transfer capability missing') end
+    if insn.op == asm.EVENT then check((self.caps & asm.EMIT) ~= 0, 'event capability missing') end
+    if insn.op == asm.SLEEP then check((self.caps & asm.WAIT) ~= 0, 'wait capability missing') end
+  end
+  local out: [12320]uint8
+  out[0], out[1], out[2], out[3] = 68, 82, 70, 84 -- DRFT
+  put32(&out, 4, 1)
+  put32(&out, 8, self.count)
+  put32(&out, 12, self.memory_len)
+  put32(&out, 16, self.data_len)
+  put32(&out, 20, self.caps)
+  put32(&out, 24, self.entry)
+  put32(&out, 28, self.bus)
+  for i: uint32 = 0, < self.count do
+    local p = 32 + i*8
+    local insn = self.code[i]
+    out[p], out[p+1], out[p+2], out[p+3] = insn.op, insn.a, insn.b, insn.c
+    put32(&out, p+4, insn.imm)
+  end
+  local data_at = 32 + self.count*8
+  for i: uint32 = 0, < self.data_len do out[data_at+i] = self.data[i] end
+  local file = C.fopen(path, 'wb')
+  check(file ~= nilptr, 'cannot open output module')
+  local size = data_at + self.data_len
+  local written = C.fwrite(&out[0], 1, size, file)
+  local closed = C.fclose(file)
+  check(written == size and closed == 0, 'cannot write output module')
+end
+
+return asm

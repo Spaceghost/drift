@@ -1,0 +1,12 @@
+name: Check
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  machine:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: make check sanitize freestanding size
+      - run: sh tools/bootstrap.sh
+      - run: make verify-generated NELUA="$PWD/.toolchain/nelua/nelua"

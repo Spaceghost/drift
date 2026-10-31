@@ -1,0 +1,8 @@
+# Eight-byte HID boot reports. Protocol fixtures, not hardware captures.
+# a down, unchanged, a up; left-shift plus b down, then both released.
+xfer - 8 0 0000040000000000
+xfer - 8 0 0000040000000000
+xfer - 8 0 0000000000000000
+xfer - 8 0 0200050000000000
+xfer - 8 0 0000000000000000
+stop

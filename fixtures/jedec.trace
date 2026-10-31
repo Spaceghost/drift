@@ -1,0 +1,2 @@
+# A Winbond-style JEDEC ID response. Protocol fixture, not a hardware capture.
+xfer 9f 3 0 ef4018

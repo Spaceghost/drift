@@ -1,0 +1,178 @@
+-- Drift: a portable driver machine. SPDX-License-Identifier: MIT
+-- The machine knows bytes, integers and effects. The host knows devices.
+## pragmas.nogc = true
+## pragmas.noentrypoint = true
+## pragmas.nochecks = true -- Every untrusted boundary is checked explicitly.
+## pragmas.nocstaticassert = true -- Fixed-width types only; no target-sized layout assumptions.
+## pragmas.unitname = 'drift'
+
+local Insn: type <cimport 'drift_insn', cinclude '"drift.h"'> = @record{
+  op: uint8, a: uint8, b: uint8, c: uint8, imm: uint32
+}
+local Effect: type <cimport 'drift_effect', cinclude '"drift.h"'> = @record{
+  instance: uint64, ticket: uint32, kind: uint32,
+  tx: uint32, tx_len: uint32, rx: uint32, rx_len: uint32,
+  tag: uint32, x: uint32, y: uint32, z: uint32
+}
+local VM: type <cimport 'drift_vm', cinclude '"drift.h"'> = @record{
+  r: array(uint32, 16), code: array(Insn, 1024), memory: array(uint8, 4096),
+  effect: Effect, instance: uint64, steps: uint64,
+  pc: uint32, code_len: uint32, memory_len: uint32,
+  caps: uint32, bus: uint32, sequence: uint32, state: int32
+}
+
+local function le32(p: *[0]uint8, n: uint32): uint32
+  return uint32(p[n]) | (uint32(p[n+1]) << 8) |
+         (uint32(p[n+2]) << 16) | (uint32(p[n+3]) << 24)
+end
+
+local function span(total: uint32, start: uint32, count: uint32): boolean
+  return start <= total and count <= total - start
+end
+
+local function trap(v: *VM, error: int32): int32
+  v.state = error
+  return error
+end
+
+local function drift_load(v: *VM, p: *[0]uint8, size: uint32,
+                         grants: uint32, instance: uint64): int32
+                         <cexport, codename 'drift_load'>
+  if v == nilptr then return -9 end
+  v.state = -1 -- A failed load cannot leave an older driver runnable.
+  if p == nilptr or size < 32 or instance == 0 then return -1 end
+  if p[0] ~= 68 or p[1] ~= 82 or p[2] ~= 70 or p[3] ~= 84 or
+     le32(p,4) ~= 1 then return -1 end
+  local count, memory, data = le32(p,8), le32(p,12), le32(p,16)
+  local caps, entry, bus = le32(p,20), le32(p,24), le32(p,28)
+  if count == 0 or count > 1024 or memory == 0 or memory > 4096 or
+     data > memory or entry >= count or bus > 3 or (caps & ~7_u32) ~= 0 then
+    return -1
+  end
+  -- count and data have already been bounded; this expression cannot overflow.
+  if size ~= 32 + count*8 + data then return -1 end
+  if (caps & grants) ~= caps then return -4 end
+  if (caps & 1) ~= 0 and bus == 0 then return -1 end
+
+  local i: uint32 = 0
+  while i < count do
+    local off = 32 + i*8
+    local op, a, b, c, imm = p[off], p[off+1], p[off+2], p[off+3], le32(p,off+4)
+    if op > 22 or a >= 16 or b >= 16 or c >= 16 then return -2 end
+    if op >= 16 and op <= 19 and imm >= count then return -2 end
+    if op == 20 and (imm >= 16 or (caps & 1) == 0) then return -4 end
+    if op == 21 and (caps & 2) == 0 then return -4 end
+    if op == 22 and (caps & 4) == 0 then return -4 end
+    v.code[i].op, v.code[i].a, v.code[i].b, v.code[i].c = op, a, b, c
+    v.code[i].imm = imm
+    i = i+1
+  end
+  i = 0
+  while i < 16 do v.r[i] = 0; i = i+1 end
+  i = 0
+  while i < 4096 do
+    if i < data then v.memory[i] = p[32 + count*8 + i]
+    else v.memory[i] = 0 end
+    i = i+1
+  end
+  v.instance, v.steps, v.sequence = instance, 0, 0
+  v.code_len, v.memory_len, v.pc = count, memory, entry
+  v.caps, v.bus, v.state = caps, bus, 0
+  v.effect.instance, v.effect.ticket, v.effect.kind = instance, 0, 0
+  v.effect.tx, v.effect.tx_len, v.effect.rx, v.effect.rx_len = 0, 0, 0, 0
+  v.effect.tag, v.effect.x, v.effect.y, v.effect.z = 0, 0, 0, 0
+  return 0
+end
+
+local function drift_run(v: *VM, fuel: uint32): int32
+                        <cexport, codename 'drift_run'>
+  if v == nilptr then return -9 end
+  if v.state ~= 0 then return v.state end
+  while fuel > 0 do
+    if v.pc >= v.code_len then return trap(v,-3) end
+    local ins = v.code[v.pc]
+    local a, b, c, imm, op = ins.a, ins.b, ins.c, ins.imm, ins.op
+    v.pc, v.steps, fuel = v.pc+1, v.steps+1, fuel-1
+
+    if op == 0 then v.state = 3; return 3
+    elseif op == 1 then v.r[a] = imm
+    elseif op == 2 then v.r[a] = v.r[b]
+    elseif op == 3 then v.r[a] = v.r[b] + v.r[c]
+    elseif op == 4 then v.r[a] = v.r[b] - v.r[c]
+    elseif op == 5 then v.r[a] = v.r[b] * v.r[c]
+    elseif op == 6 then
+      if v.r[c] == 0 then return trap(v,-7) end
+      v.r[a] = v.r[b] // v.r[c]
+    elseif op == 7 then v.r[a] = v.r[b] & v.r[c]
+    elseif op == 8 then v.r[a] = v.r[b] | v.r[c]
+    elseif op == 9 then v.r[a] = v.r[b] ~ v.r[c]
+    elseif op == 10 then v.r[a] = v.r[b] << (v.r[c] & 31)
+    elseif op == 11 then v.r[a] = v.r[b] >> (v.r[c] & 31)
+    elseif op >= 12 and op <= 15 then
+      local base, width = v.r[b], 1_u32
+      if op >= 14 then width = 4 end
+      if not span(v.memory_len,base,imm) or
+         not span(v.memory_len,base+imm,width) then return trap(v,-3) end
+      local addr = base+imm
+      if op == 12 then v.r[a] = v.memory[addr]
+      elseif op == 13 then v.memory[addr] = uint8(v.r[a] & 255)
+      elseif op == 14 then v.r[a] = le32((@*[0]uint8)(&v.memory[0]),addr)
+      else
+        local value = v.r[a]
+        v.memory[addr] = uint8(value & 255)
+        v.memory[addr+1] = uint8((value >> 8) & 255)
+        v.memory[addr+2] = uint8((value >> 16) & 255)
+        v.memory[addr+3] = uint8(value >> 24)
+      end
+    elseif op == 16 then v.pc = imm
+    elseif op == 17 then if v.r[a] == v.r[b] then v.pc = imm end
+    elseif op == 18 then if v.r[a] ~= v.r[b] then v.pc = imm end
+    elseif op == 19 then if v.r[a] < v.r[b] then v.pc = imm end
+    elseif op >= 20 and op <= 22 then
+      if v.sequence == 0xffffffff_u32 then return trap(v,-8) end
+      v.effect.tx, v.effect.tx_len, v.effect.rx, v.effect.rx_len = 0, 0, 0, 0
+      v.effect.tag, v.effect.x, v.effect.y, v.effect.z = 0, 0, 0, 0
+      if op == 20 then
+        local tx, txlen, rx, rxlen = v.r[a], v.r[b], v.r[c], v.r[imm]
+        if not span(v.memory_len,tx,txlen) or not span(v.memory_len,rx,rxlen) then
+          return trap(v,-3)
+        end
+        v.effect.tx, v.effect.tx_len, v.effect.rx, v.effect.rx_len = tx, txlen, rx, rxlen
+        v.effect.kind = 1
+      elseif op == 21 then
+        v.effect.kind, v.effect.tag = 2, imm
+        v.effect.x, v.effect.y, v.effect.z = v.r[a], v.r[b], v.r[c]
+      else v.effect.kind, v.effect.x = 3, v.r[a] end
+      v.sequence = v.sequence+1
+      v.effect.instance, v.effect.ticket = v.instance, v.sequence
+      v.state = 1
+      return 1
+    else return trap(v,-2) end
+  end
+  return 2 -- Cooperative quota exhaustion: the driver remains runnable.
+end
+
+local function drift_complete(v: *VM, instance: uint64, ticket: uint32,
+                             status: int32, data: *[0]uint8, size: uint32): int32
+                             <cexport, codename 'drift_complete'>
+  if v == nilptr then return -9 end
+  if v.state ~= 1 then return -5 end
+  if v.instance ~= instance or v.effect.ticket ~= ticket then return -6 end
+  if status > 0 or (status < 0 and size ~= 0) or
+     (size ~= 0 and data == nilptr) then return -9 end
+  if v.effect.kind ~= 1 and size ~= 0 then return -9 end
+  if size > v.effect.rx_len then return -3 end
+  local i: uint32 = 0
+  -- uintptr_t is used only for host buffer overlap, never a guest address.
+  -- No library memmove, and no relational comparison of unrelated C pointers.
+  local dst, src = (@usize)(&v.memory[v.effect.rx]), (@usize)(data)
+  if dst > src and dst-src < size then
+    i = size
+    while i > 0 do i = i-1; v.memory[v.effect.rx+i] = data[i] end
+  else
+    while i < size do v.memory[v.effect.rx+i] = data[i]; i = i+1 end
+  end
+  -- int32 -> uint32 is intentionally a two's-complement status word.
+  v.r[0], v.r[1], v.state = uint32(status), size, 0
+  return 0
+end

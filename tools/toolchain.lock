@@ -1,0 +1,4 @@
+repository https://github.com/Spaceghost/nelua-lang
+commit 3c29419776dfdca194fa7e9c572498264fe5c654
+language Nelua 0.2.0-dev
+backend C11
