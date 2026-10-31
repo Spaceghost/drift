@@ -1,0 +1,7 @@
+kernel_repository=https://deb.debian.org/debian
+installer_release=20250803+deb13u7
+kernel_url=https://deb.debian.org/debian/dists/trixie/main/installer-amd64/20250803+deb13u7/images/netboot/debian-installer/amd64/linux
+kernel_sha256=2b2358b37674d2505350528875bb17afae2a36522a9e8a9417eaca65a7da0e08
+checksum_manifest_url=https://deb.debian.org/debian/dists/trixie/main/installer-amd64/20250803+deb13u7/images/SHA256SUMS
+checksum_manifest_sha256=31a1a4fc99c5b0a729d261f137cd7e1599bfa6f214f83fe4e596543d8ccf2dec
+qemu_inventory=ports/minix/qemu-ubuntu-noble.json

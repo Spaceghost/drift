@@ -1,0 +1,10 @@
+$ make -B -C /workspace/scratch/7de47ba8b27a/drift/imports/linux/pcspkr library BUILD=/workspace/scratch/7de47ba8b27a/drift/build/linux-verified/linux-objects CC=cc CFLAGS=-Os
+make: Entering directory '/workspace/scratch/7de47ba8b27a/drift/imports/linux/pcspkr'
+sha256sum -c SHA256SUMS
+upstream/pcspkr.c: OK
+upstream/COPYING.GPL-2.0: OK
+mkdir -p /workspace/scratch/7de47ba8b27a/drift/build/linux-verified/linux-objects
+cc -std=c11 -Wall -Wextra -Werror -Os -ffreestanding -fno-builtin -fno-stack-protector -fno-strict-aliasing -I. -Icompat -c compat.generated.c -o /workspace/scratch/7de47ba8b27a/drift/build/linux-verified/linux-objects/compat.o
+cc -std=c11 -Wall -Wextra -Werror -Wno-unused-parameter -Os -ffreestanding -fno-builtin -fno-stack-protector -fno-strict-aliasing -I. -Icompat -c driver.c -o /workspace/scratch/7de47ba8b27a/drift/build/linux-verified/linux-objects/driver.o
+ar rcs /workspace/scratch/7de47ba8b27a/drift/build/linux-verified/linux-objects/libdrift-linux-pcspkr.a /workspace/scratch/7de47ba8b27a/drift/build/linux-verified/linux-objects/compat.o /workspace/scratch/7de47ba8b27a/drift/build/linux-verified/linux-objects/driver.o
+make: Leaving directory '/workspace/scratch/7de47ba8b27a/drift/imports/linux/pcspkr'

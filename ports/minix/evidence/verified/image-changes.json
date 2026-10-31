@@ -1,0 +1,34 @@
+{
+  "base_sha256": "389be8cbc2b74022671c082d0b88511b17e63b18003a14647b03331e3467b4c4",
+  "test_sha256": "f91233fe190dc8d358937b74597bde09845f9c93542d2d16b8e887ebc2c1cbd6",
+  "changes": [
+    {
+      "path": "/bin/calendar",
+      "partition_sector": 82088,
+      "old_sha256": "911f115f7ba224fc0fab12e6f240d3c6b35a17cc0813b5a1fd192261107df6e8",
+      "payload_sha256": "d5d9793c50d626bb29c13a25ed011d6e8a2b6e2670098ef2e13ff7b2648fb23d",
+      "kept_file_size": true
+    },
+    {
+      "path": "/bin/cal",
+      "partition_sector": 82088,
+      "old_sha256": "f627e12a19f770758b0da84569e5e398da6ba1f6f62250dba162fa3877426172",
+      "payload_sha256": "2c7a4be8eb4e8715ad4fb3fc85185e6f69fe3739598217fb463a9fd45ef45e38",
+      "kept_file_size": true
+    },
+    {
+      "path": "/bin/fetch",
+      "partition_sector": 82088,
+      "old_sha256": "65c681f4d8ed4dbb8c79fa3df64822cf00e3f81737fdaa160a2a2d63e3e50800",
+      "payload_sha256": "02af679eb64092b04c71c22b283a0f5dae0690d1bf12fad9a2d117363dcb2d58",
+      "kept_file_size": true
+    },
+    {
+      "path": "/etc/rc.cd",
+      "partition_sector": 12288,
+      "old_sha256": "42b58b14d5b85c70ec77c7a4717908e450348cb0507d351325dcf074baf37b74",
+      "payload_sha256": "84b6b79f3b51da1118eb0148f65af8d73bf9ae24e09dbe735e69a52d170e5d97",
+      "kept_file_size": false
+    }
+  ]
+}

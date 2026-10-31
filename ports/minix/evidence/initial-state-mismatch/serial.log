@@ -1,0 +1,29 @@
+
+MINIX 3.3.0. (588a35b)
+Copyright 2014, Vrije Universiteit, Amsterdam, The Netherlands
+MINIX is open source software, see http://www.minix3.org
+TTY: not initializing rs232 line 1 (in use by kernel)
+Started VFS: 9 worker thread(s)
+DRIFT_MINIX_GUEST_START
+Minix minix 3.3.0 Minix 3.3.0 (GENERIC) i386
+DRIFT_MINIX_NOBEEP=1
+DRIFT_MINIX_MODEL_PASS: upstream driver; modeled ports; pthread case omitted
+DRIFT_MINIX_LINUX_MODEL_EXIT=0
+Windows Moufiltr: 584 checks passed (actual source, nested/pending requests, callbacks, ownership and failures)
+DRIFT_MINIX_WINDOWS_MODEL_EXIT=0
+DRIFT_MINIX_PIO_UP_EXIT=0
+do_devio: port 0x80 (size 1) not allowed
+DRIFT_MINIX_PIO_DENIAL port=0x80 code=-1
+DRIFT_MINIX_TRACE_BAD index=7 kind=82 port=97 value=0
+DRIFT_MINIX_PIO_BENCH kind=drift round=1 events=10000 elapsed_us=1083333 reads=10000 writes=40000 waits=40000 trace=2932125812
+DRIFT_MINIX_PIO_BENCH kind=reference round=1 events=10000 elapsed_us=1083333 reads=10000 writes=40000 waits=40000 trace=1102287813
+DRIFT_MINIX_PIO_BENCH kind=reference round=2 events=10000 elapsed_us=1216667 reads=10000 writes=40000 waits=40000 trace=1102287813
+DRIFT_MINIX_PIO_BENCH kind=drift round=2 events=10000 elapsed_us=1116667 reads=10000 writes=40000 waits=40000 trace=1102287813
+DRIFT_MINIX_PIO_BENCH kind=drift round=3 events=10000 elapsed_us=1166666 reads=10000 writes=40000 waits=40000 trace=1102287813
+DRIFT_MINIX_PIO_BENCH kind=reference round=3 events=10000 elapsed_us=1133334 reads=10000 writes=40000 waits=40000 trace=1102287813
+DRIFT_MINIX_PIO_BENCH kind=reference round=4 events=10000 elapsed_us=1216666 reads=10000 writes=40000 waits=40000 trace=1102287813
+DRIFT_MINIX_PIO_BENCH kind=drift round=4 events=10000 elapsed_us=1150000 reads=10000 writes=40000 waits=40000 trace=1102287813
+DRIFT_MINIX_PIO_PASS: actual sys_inb/sys_outb and PIT2 mode/gate readback; TTY nobeep=1; no IRQ handler
+DRIFT_MINIX_PIO_STATUS=PASS
+DRIFT_MINIX_PIO_DOWN_EXIT=0
+DRIFT_MINIX_ALL_DONE

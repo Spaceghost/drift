@@ -58,6 +58,10 @@ The first opt-in profiles compile an unchanged
 runtimes are Nelua. Source/profile tests establish their documented API subsets;
 they do not establish arbitrary `.ko`/`.sys` loading or hardware support.
 
+Run the verified emulated-device examples on [Linux](ports/linux),
+[Genode](ports/genode) and [MINIX](ports/minix). The native Windows CI job runs
+both source-profile models; it does not load a Windows kernel driver.
+
 The common [resource interface](include/drift_hw.h) has callbacks for register
 access, coherent DMA allocation, synchronization and time. Drivers own their
 commands, queues and resets. [Portable PCI helpers](include/drift_pci.h) provide

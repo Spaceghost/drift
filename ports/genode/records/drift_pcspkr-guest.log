@@ -1,0 +1,36 @@
+qemu-system-x86_64: warning: TCG doesn't support requested feature: CPUID.01H:ECX.pcid [bit 17]
+qemu-system-x86_64: warning: TCG doesn't support requested feature: CPUID.01H:ECX.x2apic [bit 21]
+qemu-system-x86_64: warning: TCG doesn't support requested feature: CPUID.01H:ECX.tsc-deadline [bit 24]
+qemu-system-x86_64: warning: TCG doesn't support requested feature: CPUID.07H:EBX.hle [bit 4]
+qemu-system-x86_64: warning: TCG doesn't support requested feature: CPUID.07H:EBX.invpcid [bit 10]
+qemu-system-x86_64: warning: TCG doesn't support requested feature: CPUID.07H:EBX.rtm [bit 11]
+qemu-system-x86_64: warning: TCG doesn't support requested feature: CPUID.0DH:EAX.xsavec [bit 1]
+
+Bender Version 0.9-beta7-51-g28ba2ad-dirty
+Patching BDA with I/O port 0x3f8.
+Bender: Hello World.
+Need 0038d000 bytes to relocate modules.
+Relocating to 1fc52000: 
+Copying 3720128 bytes...
+
+Cpu apic_id=0x0 [0:0:0:0:0:0] 
+
+
+kernel initialized
+Genode 26.08
+498 MiB RAM and 64536 caps assigned to init
+[init -> drift-speaker] Drift Linux pcspkr resource-backed service ready
+[init -> test-drift-speaker] DRIFT_GENODE_SAMPLE round=1 position=1 variant=import cycles=100 rpc=400 writes=500 reads=400 delays=500 guest_us=374938
+[init -> test-drift-speaker] DRIFT_GENODE_SAMPLE round=1 position=2 variant=reference cycles=100 rpc=400 writes=500 reads=400 delays=500 guest_us=368740
+[init -> test-drift-speaker] DRIFT_GENODE_SAMPLE round=2 position=1 variant=reference cycles=100 rpc=400 writes=500 reads=400 delays=500 guest_us=388423
+[init -> test-drift-speaker] DRIFT_GENODE_SAMPLE round=2 position=2 variant=import cycles=100 rpc=400 writes=500 reads=400 delays=500 guest_us=380491
+[init -> test-drift-speaker] DRIFT_GENODE_SAMPLE round=3 position=1 variant=import cycles=100 rpc=400 writes=500 reads=400 delays=500 guest_us=383813
+[init -> test-drift-speaker] DRIFT_GENODE_SAMPLE round=3 position=2 variant=reference cycles=100 rpc=400 writes=500 reads=400 delays=500 guest_us=328479
+[init -> test-drift-speaker] DRIFT_GENODE_SAMPLE round=4 position=1 variant=reference cycles=100 rpc=400 writes=500 reads=400 delays=500 guest_us=359270
+[init -> test-drift-speaker] DRIFT_GENODE_SAMPLE round=4 position=2 variant=import cycles=100 rpc=400 writes=500 reads=400 delays=500 guest_us=382597
+[init -> drift-speaker] Drift speaker close status=0 writes=4011 reads=3210 delays=4011
+[init -> drift-speaker] Drift speaker close status=0 writes=4011 reads=3210 delays=4011
+[init -> drift-speaker] Drift speaker close status=0 writes=4017 reads=3215 delays=4017
+[init -> test-drift-speaker] Drift Linux pcspkr Genode REAL-IO PASS
+[init] child "test-drift-speaker" exited with exit value 0
+qemu-system-x86_64: terminating on signal 15 from pid 1238 (<unknown process>)

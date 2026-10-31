@@ -1,0 +1,10 @@
+platform=Genode 26.08 x86_64 base-hw pc
+source_commit=d18ee9e917200b059549e21f2dd9a55bfe61a0eb
+source_url=https://codeberg.org/genodelabs/genode/archive/26.08.tar.gz
+source_sha256=df74f96c70c72607d66f5440439680b63683f09edd92809996845f0f29453a74
+source_tree_format=drift-genode-source-tree-v1
+source_tree_sha256=d520090fc4798c75fa38f7f34cd69dafbcfe2069929e6968b59da588fec42078
+toolchain=Genode 25.05 Ubuntu 24.04 GCC 14.2.0
+toolchain_url=https://codeberg.org/genodelabs/genode/releases/download/25.05/genode-toolchain-25.05-ubuntu-24.04.tar.xz
+toolchain_sha256=6cab8e5f4490399a296a73b01695d5fb055a40f6ac04d61a3f7a7344003eb739
+qemu=Ubuntu 24.04 QEMU 8.2.2 TCG x86_64 q35 Skylake-Client 512MiB 1vCPU

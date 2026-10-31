@@ -1,0 +1,18 @@
+{
+  "genode_source_url": "https://codeberg.org/genodelabs/genode/archive/26.08.tar.gz",
+  "genode_source_commit": "d18ee9e917200b059549e21f2dd9a55bfe61a0eb",
+  "source_archive_sha256": "df74f96c70c72607d66f5440439680b63683f09edd92809996845f0f29453a74",
+  "toolchain_archive_sha256": "6cab8e5f4490399a296a73b01695d5fb055a40f6ac04d61a3f7a7344003eb739",
+  "linux_driver_sha256": "a73cf08b1543da44b905957ee35b92ddf5d55a4c283da98d24556636e121d492",
+  "genode_host_source_patched": false,
+  "global_install_or_host_hardware_access": false,
+  "public_path_build": true,
+  "sample_count": 8,
+  "resource_denial": "Genode startup fail-stop; no service announcement; no successful operation claimed",
+  "earlier_private_prototype_trials": "Not pooled with these public-path samples; no stale-image probe is counted.",
+  "genode_source_tree_sha256": "d520090fc4798c75fa38f7f34cd69dafbcfe2069929e6968b59da588fec42078",
+  "source_tree_format": "drift-genode-source-tree-v1",
+  "source_tree_entries": 11190,
+  "source_pin_enforced_at_build_and_boot": true,
+  "prior_public_samples": "before-sdk-enforcement/ contains the earlier public-path trials, separately; not pooled with the strict-pin rerun."
+}

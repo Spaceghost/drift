@@ -1,0 +1,85 @@
+name: Guest source qualification
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - imports/**
+      - ports/**
+      - '!ports/**/evidence/**'
+      - '!ports/**/records/**'
+      - '!ports/**/*.md'
+      - tests/bench_linux_import.*
+      - .github/workflows/guests.yml
+permissions:
+  contents: read
+jobs:
+  linux-minix:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [linux, minix]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Boot and verify the real guest
+        run: python3 ports/${{ matrix.os }}/run.py --work "$PWD/build/qualification-${{ matrix.os }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: guest-${{ matrix.os }}
+          path: |
+            build/qualification-${{ matrix.os }}/**/*.json
+            build/qualification-${{ matrix.os }}/**/*.log
+            build/qualification-${{ matrix.os }}/**/*.tsv
+  genode:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Host build and emulation tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq expect libfl2 qemu-system-x86
+      - name: Fetch and verify the pinned SDK archives
+        run: |
+          python3 - <<'PY'
+          import hashlib,os,pathlib,subprocess,urllib.request
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'drift-genode'
+          root.mkdir()
+          pins=dict(line.split('=',1) for line in pathlib.Path('ports/genode/SDK').read_text().splitlines() if line)
+          for kind,filename in [('source','source.tar.gz'),('toolchain','toolchain.tar.xz')]:
+              archive=root/filename
+              with urllib.request.urlopen(pins[kind+'_url'],timeout=60) as source,archive.open('wb') as output:
+                  while chunk:=source.read(1024*1024): output.write(chunk)
+              with archive.open('rb') as data: actual=hashlib.file_digest(data,'sha256').hexdigest()
+              if actual!=pins[kind+'_sha256']: raise SystemExit(kind+' archive checksum mismatch')
+              target=root/kind;target.mkdir()
+              command=['tar','--no-same-owner','-xf',str(archive),'-C',str(target)]
+              if kind=='source': command+=['--strip-components=1']
+              subprocess.run(command,check=True)
+          with open(os.environ['GITHUB_ENV'],'a') as env:
+              env.write('GENODE_SOURCE='+str(root/'source')+'\n')
+              env.write('GENODE_PREFIX='+str(root/'toolchain/usr/local/genode/tool/25.05/bin/genode-x86-')+'\n')
+          PY
+      - name: Verify source pins and real-I/O service
+        run: |
+          python3 ports/genode/test_source_tree.py
+          python3 ports/genode/build.py --genode-dir "$GENODE_SOURCE" --toolchain-prefix "$GENODE_PREFIX"
+          python3 ports/genode/boot.py --genode-dir "$GENODE_SOURCE"
+      - name: Verify denied resource authority
+        run: |
+          python3 ports/genode/build.py --genode-dir "$GENODE_SOURCE" --toolchain-prefix "$GENODE_PREFIX" --scenario drift_pcspkr_denied
+          python3 ports/genode/boot.py --genode-dir "$GENODE_SOURCE" --scenario drift_pcspkr_denied
+      - name: Boot the separate no-I/O component model
+        run: python3 ports/genode/component-model/run.py --genode-dir "$GENODE_SOURCE" --toolchain-prefix "$GENODE_PREFIX"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: guest-genode
+          path: |
+            build/genode/**/*.json
+            build/genode/**/*.log
+            build/genode-component-model/**/*.json
+            build/genode-component-model/**/*.log
+            build/genode-component-model/**/*.tsv

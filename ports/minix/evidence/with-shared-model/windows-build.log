@@ -1,0 +1,9 @@
+make: Entering directory '/workspace/scratch/7de47ba8b27a/drift/imports/windows/moufiltr'
+sha256sum -c SHA256SUMS
+upstream/moufiltr.c: OK
+upstream/moufiltr.h: OK
+upstream/LICENSE.MS-PL: OK
+cc -m32 -std=c11 -Os -fno-strict-aliasing -fno-stack-protector -fno-pie -D__minix --sysroot=/workspace/scratch/7de47ba8b27a/drift/build/minix-public/sdk -isystem /workspace/scratch/7de47ba8b27a/drift/build/minix-public/sdk/usr/include -I. -Icompat -std=c11 -Wall -Wextra -Werror -Wno-unknown-pragmas -Os -ffreestanding -fno-builtin -fno-stack-protector -fno-strict-aliasing -c compat.generated.c -o /workspace/scratch/7de47ba8b27a/drift/build/minix-public/windows-objects/compat.o
+cc -m32 -std=c11 -Os -fno-strict-aliasing -fno-stack-protector -fno-pie -D__minix --sysroot=/workspace/scratch/7de47ba8b27a/drift/build/minix-public/sdk -isystem /workspace/scratch/7de47ba8b27a/drift/build/minix-public/sdk/usr/include -I. -Icompat -std=c11 -Wall -Wextra -Werror -Wno-unknown-pragmas -Os -ffreestanding -fno-builtin -fno-stack-protector -fno-strict-aliasing -c driver.c -o /workspace/scratch/7de47ba8b27a/drift/build/minix-public/windows-objects/driver.o
+ar rcs /workspace/scratch/7de47ba8b27a/drift/build/minix-public/windows-objects/libdrift-windows-moufiltr.a /workspace/scratch/7de47ba8b27a/drift/build/minix-public/windows-objects/compat.o /workspace/scratch/7de47ba8b27a/drift/build/minix-public/windows-objects/driver.o
+make: Leaving directory '/workspace/scratch/7de47ba8b27a/drift/imports/windows/moufiltr'

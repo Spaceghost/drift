@@ -86,3 +86,33 @@ Four OSes on different hosts, or KVM versus TCG, are different environments.
 Such runs establish usability and provide diagnostics; they do not by
 themselves establish a fair performance ranking. Timing a register model is
 a component benchmark, not a hardware-driver shootout.
+
+## Reproduce the current evidence
+
+```sh
+make linux-check windows-check
+make linux-sanitize windows-sanitize
+make linux-bench
+python3 ports/linux/run.py
+python3 ports/minix/run.py
+```
+
+The [Genode kit](../ports/genode) uses an independently pinned source SDK and
+cross-toolchain. Its [component model](../ports/genode/component-model) is a
+separate guest program with no I/O-port authority. MINIX also runs that shared
+500,000-event fixture. CI publishes the native Linux and Windows results.
+The common fixture verifies identical transcripts before reporting all eight
+reversed-order samples; its 794-check API test rejects failed, frozen and
+backward clocks and propagates output failures.
+
+Real-I/O paired trials are retained separately in [Linux](../ports/linux/evidence),
+[MINIX](../ports/minix/evidence/with-shared-model) and
+[Genode](../ports/genode/records). Their references use the same callbacks and
+register sequence; none is a full native-kernel driver stack. Different trial
+sizes and guest configurations preclude an OS ranking. Short timer/emulator
+measurements establish no speed advantage.
+
+The source profiles above are implemented. The network/storage/DMA targets in
+the selection table are **not yet imported or qualified**. Windows kernel
+loading, general WDF/NDIS/StorPort compatibility and physical device
+qualification remain unverified. Do not infer those from a green host-model job.

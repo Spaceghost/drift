@@ -1,0 +1,62 @@
+[
+  {
+    "package": "tcl8.6",
+    "metadata_url": "https://packages.ubuntu.com/noble/amd64/tcl8.6/download",
+    "url": "https://archive.ubuntu.com/ubuntu/pool/main/t/tcl8.6/tcl8.6_8.6.14+dfsg-1build1_amd64.deb",
+    "sha256": "c262c559f67f37a150376c164642f63519469ed288559257f7502aae5448748c",
+    "bytes": 14736,
+    "unpacked": true
+  },
+  {
+    "package": "libtcl8.6",
+    "metadata_url": "https://packages.ubuntu.com/noble/amd64/libtcl8.6/download",
+    "url": "https://archive.ubuntu.com/ubuntu/pool/main/t/tcl8.6/libtcl8.6_8.6.14+dfsg-1build1_amd64.deb",
+    "sha256": "7534eb825f6317514d747ce53b4d6c23bf24df1dc1785f9599610ece5515e685",
+    "bytes": 987614,
+    "unpacked": true
+  },
+  {
+    "package": "expect",
+    "metadata_url": "https://packages.ubuntu.com/noble/amd64/expect/download",
+    "url": "https://archive.ubuntu.com/ubuntu/pool/universe/e/expect/expect_5.45.4-3_amd64.deb",
+    "sha256": "c674010c394cbd3a40fe0635fd4a660c95c5faf5bda29b74d15be3866a1d93f3",
+    "bytes": 136718,
+    "unpacked": true
+  },
+  {
+    "package": "libexpect5.45",
+    "error": "no primary package download metadata"
+  },
+  {
+    "package": "tcl-expect",
+    "metadata_url": "https://packages.ubuntu.com/noble/amd64/tcl-expect/download",
+    "url": "https://archive.ubuntu.com/ubuntu/pool/universe/e/expect/tcl-expect_5.45.4-3_amd64.deb",
+    "sha256": "622bac80cc9e896dcef94f191103cb1ce36ff7ce6e819ca8e3d31716cb2085b8",
+    "bytes": 109990,
+    "unpacked": true
+  },
+  {
+    "package": "libfl2",
+    "metadata_url": "https://packages.ubuntu.com/noble/amd64/libfl2/download",
+    "url": "https://archive.ubuntu.com/ubuntu/pool/main/f/flex/libfl2_2.6.4-8.2build1_amd64.deb",
+    "sha256": "098db71e672ded6e8194eec7132a2ca31dee49022848c7b0f77ce912d99cb445",
+    "bytes": 9768,
+    "unpacked": true
+  },
+  {
+    "package": "flex",
+    "metadata_url": "https://packages.ubuntu.com/noble/amd64/flex/download",
+    "url": "https://archive.ubuntu.com/ubuntu/pool/main/f/flex/flex_2.6.4-8.2build1_amd64.deb",
+    "sha256": "c5604f55827b50e3f568b4731b7799f86b147454c867be02bc141d9d8ce561ff",
+    "bytes": 300754,
+    "unpacked": true
+  },
+  {
+    "package": "bison",
+    "metadata_url": "https://packages.ubuntu.com/noble-updates/amd64/bison/download",
+    "url": "https://archive.ubuntu.com/ubuntu/pool/main/b/bison/bison_3.8.2+dfsg-1ubuntu0.24.04.1_amd64.deb",
+    "sha256": "9d75084d1293f68f3c1a2ee677dea5baa4e010bac2d4c455d8e23177e97aa353",
+    "bytes": 748794,
+    "unpacked": true
+  }
+]

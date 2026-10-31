@@ -1,0 +1,15 @@
+build { core init lib/ld timer server/drift_speaker test/drift_speaker }
+create_boot_directory
+install_config {
+<config>
+ <parent-provides>
+  <service name="LOG"/><service name="PD"/><service name="CPU"/><service name="ROM"/><service name="IO_PORT"/>
+ </parent-provides>
+ <default-route><any-service><parent/><any-child/></any-service></default-route>
+ <default caps="100"/>
+ <start name="timer"><resource name="RAM" quantum="1M"/><provides><service name="Timer"/></provides></start>
+ <start name="drift-speaker"><resource name="RAM" quantum="4M"/><provides><service name="Drift_speaker"/></provides></start>
+ <start name="test-drift-speaker"><resource name="RAM" quantum="4M"/></start>
+</config>
+}
+build_boot_image [build_artifacts]

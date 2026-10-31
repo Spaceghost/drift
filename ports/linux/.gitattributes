@@ -1,0 +1,2 @@
+# Qualification artifacts retain exact bytes, including serial CRLFs.
+evidence/** -text

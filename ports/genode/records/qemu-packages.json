@@ -1,0 +1,106 @@
+[
+  {
+    "package": "libfdt1",
+    "metadata_url": "https://packages.ubuntu.com/noble/amd64/libfdt1/download",
+    "url": "https://archive.ubuntu.com/ubuntu/pool/main/d/device-tree-compiler/libfdt1_1.7.0-2build1_amd64.deb",
+    "sha256": "274d20dfab9d6b216b5de85446a93f6ce5b2cd82c847b8dfdc508577f76eb96a",
+    "bytes": 20128,
+    "unpacked": true
+  },
+  {
+    "package": "libpmem1",
+    "metadata_url": "https://packages.ubuntu.com/noble/amd64/libpmem1/download",
+    "url": "https://archive.ubuntu.com/ubuntu/pool/main/p/pmdk/libpmem1_1.13.1-1.1ubuntu2_amd64.deb",
+    "sha256": "8f1be1cc834a98f0cf5c0950153f7f939a0c2c92095e98cd7bb40c752c545c1b",
+    "bytes": 84760,
+    "unpacked": true
+  },
+  {
+    "package": "librdmacm1t64",
+    "metadata_url": "https://packages.ubuntu.com/noble-updates/amd64/librdmacm1t64/download",
+    "url": "https://archive.ubuntu.com/ubuntu/pool/main/r/rdma-core/librdmacm1t64_50.0-2ubuntu0.2_amd64.deb",
+    "sha256": "7b7cc2fa16564bf301751b43d05d16f0846288b080d9a25a92a691d0df33fc68",
+    "bytes": 70698,
+    "unpacked": true
+  },
+  {
+    "package": "libibverbs1",
+    "metadata_url": "https://packages.ubuntu.com/noble-updates/amd64/libibverbs1/download",
+    "url": "https://archive.ubuntu.com/ubuntu/pool/main/r/rdma-core/libibverbs1_50.0-2ubuntu0.2_amd64.deb",
+    "sha256": "8489558105ee1d1c65ae6e0f1bac0e9b15f314a68f106ee9a63c89821242bd8e",
+    "bytes": 67960,
+    "unpacked": true
+  },
+  {
+    "package": "libslirp0",
+    "metadata_url": "https://packages.ubuntu.com/noble-updates/amd64/libslirp0/download",
+    "url": "https://archive.ubuntu.com/ubuntu/pool/main/libs/libslirp/libslirp0_4.7.0-1ubuntu3.1_amd64.deb",
+    "sha256": "4efa2d1c509de4d10fe965e86a3d864bf542996caf476d9111fd882c73857164",
+    "bytes": 63830,
+    "unpacked": true
+  },
+  {
+    "package": "liburing2",
+    "metadata_url": "https://packages.ubuntu.com/noble/amd64/liburing2/download",
+    "url": "https://archive.ubuntu.com/ubuntu/pool/main/libu/liburing/liburing2_2.5-1build1_amd64.deb",
+    "sha256": "c2aef62accee92a06263c3ad4ef46132c13e409b54296c44792a20491830a7b0",
+    "bytes": 21092,
+    "unpacked": true
+  },
+  {
+    "package": "libaio1t64",
+    "metadata_url": "https://packages.ubuntu.com/noble-updates/amd64/libaio1t64/download",
+    "url": "https://archive.ubuntu.com/ubuntu/pool/main/liba/libaio/libaio1t64_0.3.113-6build1.1_amd64.deb",
+    "sha256": "433212b33e26d424605c01cec1de33b63f2cc12870987b4cb7b3625baba66a19",
+    "bytes": 7210,
+    "unpacked": true
+  },
+  {
+    "package": "qemu-system-data",
+    "metadata_url": "https://packages.ubuntu.com/noble-updates/amd64/qemu-system-data/download",
+    "url": "https://archive.ubuntu.com/ubuntu/pool/main/q/qemu/qemu-system-data_8.2.2+ds-0ubuntu1.18_all.deb",
+    "sha256": "a14b88d864859bd61c8a3274971da4ecb7da6cec15be6c265d0d411f783d5f2e",
+    "bytes": 1796342,
+    "unpacked": true
+  },
+  {
+    "package": "seabios",
+    "metadata_url": "https://packages.ubuntu.com/noble/amd64/seabios/download",
+    "url": "https://archive.ubuntu.com/ubuntu/pool/main/s/seabios/seabios_1.16.3-2_all.deb",
+    "sha256": "cac4e59a66c834d19cae751c22ab3a0391c22f78010fd11aa2e3fe630e6bc0e0",
+    "bytes": 174648,
+    "unpacked": true
+  },
+  {
+    "package": "libdaxctl1",
+    "metadata_url": "https://packages.ubuntu.com/noble/amd64/libdaxctl1/download",
+    "url": "https://archive.ubuntu.com/ubuntu/pool/main/n/ndctl/libdaxctl1_77-2ubuntu2_amd64.deb",
+    "sha256": "c6629b49c79343fb11ae404aeaa3156f051168da6c6d3d9d8d516acd94705061",
+    "bytes": 21404,
+    "unpacked": true
+  },
+  {
+    "package": "libndctl6",
+    "metadata_url": "https://packages.ubuntu.com/noble/amd64/libndctl6/download",
+    "url": "https://archive.ubuntu.com/ubuntu/pool/main/n/ndctl/libndctl6_77-2ubuntu2_amd64.deb",
+    "sha256": "4eab53588a8fa9e3192635e118c2d91bc069cde46a4a3785c77a0bb1ae001d02",
+    "bytes": 62750,
+    "unpacked": true
+  },
+  {
+    "package": "libnl-route-3-200",
+    "metadata_url": "https://packages.ubuntu.com/noble/amd64/libnl-route-3-200/download",
+    "url": "https://archive.ubuntu.com/ubuntu/pool/main/libn/libnl3/libnl-route-3-200_3.7.0-0.3build1_amd64.deb",
+    "sha256": "8abfa9a87f78dbba7edc19ef4cfcb16b70dde562bccc3ff7550bdd3a0487e358",
+    "bytes": 189050,
+    "unpacked": true
+  },
+  {
+    "package": "qemu-system-common",
+    "url": "https://archive.ubuntu.com/ubuntu/pool/main/q/qemu/qemu-system-common_8.2.2+ds-0ubuntu1.18_amd64.deb",
+    "metadata_url": "https://packages.ubuntu.com/noble-updates/amd64/qemu-system-common/download",
+    "sha256": "0a0b744f31e87d72dd0465436b8dfbb1ef9f574ecd0d5a2e9dd8c5cb7d0fef1f",
+    "bytes": 1255316,
+    "unpacked": true
+  }
+]

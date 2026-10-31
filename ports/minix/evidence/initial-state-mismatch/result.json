@@ -1,0 +1,101 @@
+{
+  "status": "failed",
+  "checks": {
+    "linux_model": true,
+    "windows_model": true,
+    "pio": true,
+    "tty_ownership": true,
+    "denial": true,
+    "benchmarks": false
+  },
+  "benchmarks": [
+    {
+      "kind": "drift",
+      "round": 1,
+      "events": 10000,
+      "elapsed_us": 1083333,
+      "reads": 10000,
+      "writes": 40000,
+      "waits": 40000,
+      "trace": 2932125812
+    },
+    {
+      "kind": "reference",
+      "round": 1,
+      "events": 10000,
+      "elapsed_us": 1083333,
+      "reads": 10000,
+      "writes": 40000,
+      "waits": 40000,
+      "trace": 1102287813
+    },
+    {
+      "kind": "reference",
+      "round": 2,
+      "events": 10000,
+      "elapsed_us": 1216667,
+      "reads": 10000,
+      "writes": 40000,
+      "waits": 40000,
+      "trace": 1102287813
+    },
+    {
+      "kind": "drift",
+      "round": 2,
+      "events": 10000,
+      "elapsed_us": 1116667,
+      "reads": 10000,
+      "writes": 40000,
+      "waits": 40000,
+      "trace": 1102287813
+    },
+    {
+      "kind": "drift",
+      "round": 3,
+      "events": 10000,
+      "elapsed_us": 1166666,
+      "reads": 10000,
+      "writes": 40000,
+      "waits": 40000,
+      "trace": 1102287813
+    },
+    {
+      "kind": "reference",
+      "round": 3,
+      "events": 10000,
+      "elapsed_us": 1133334,
+      "reads": 10000,
+      "writes": 40000,
+      "waits": 40000,
+      "trace": 1102287813
+    },
+    {
+      "kind": "reference",
+      "round": 4,
+      "events": 10000,
+      "elapsed_us": 1216666,
+      "reads": 10000,
+      "writes": 40000,
+      "waits": 40000,
+      "trace": 1102287813
+    },
+    {
+      "kind": "drift",
+      "round": 4,
+      "events": 10000,
+      "elapsed_us": 1150000,
+      "reads": 10000,
+      "writes": 40000,
+      "waits": 40000,
+      "trace": 1102287813
+    }
+  ],
+  "elapsed_seconds": 24.18524169599914,
+  "serial_sha256": "b07bcea7fc0161d4254a06a6573c33abfb4e05ff84205aeb97da8b15ec386dc0",
+  "scopes": {
+    "linux_model": "actual MINIX userspace; modeled ports; pthread contention omitted",
+    "windows_model": "actual MINIX userspace; modeled WDF; separate MS-PL executable, no Windows kernel ABI",
+    "pio": "actual MINIX RS service, checked port I/O, native mutex and delay, emulated PIT2 readback; no physical speaker qualification"
+  },
+  "benchmark_scope": "TCG component I/O loops in one service; not OS request latency, physical hardware speed or a cross-host ranking"
+}

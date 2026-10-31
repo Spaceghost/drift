@@ -1,0 +1,11 @@
+{
+  "shared_model_median_us": {
+    "imported-linux": 550000.0,
+    "direct-reference": 350000.0
+  },
+  "pio_median_us_per_10000": {
+    "drift": 850000.0,
+    "reference": 858333.5
+  },
+  "note": "single MINIX guest QEMU TCG diagnostics; 60 Hz timing; no cross-OS rank or physical-hardware qualification"
+}

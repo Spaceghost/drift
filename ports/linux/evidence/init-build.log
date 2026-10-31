@@ -1,0 +1,1 @@
+$ cc -std=c11 -Os -fno-strict-aliasing -fno-stack-protector -fno-pie -no-pie -static -I/workspace/scratch/7de47ba8b27a/drift/imports/linux/pcspkr /workspace/scratch/7de47ba8b27a/drift/ports/linux/guest.c /workspace/scratch/7de47ba8b27a/drift/build/linux-verified/linux-objects/libdrift-linux-pcspkr.a -pthread -o /workspace/scratch/7de47ba8b27a/drift/build/linux-verified/init

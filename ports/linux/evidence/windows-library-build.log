@@ -1,0 +1,11 @@
+$ make -B -C /workspace/scratch/7de47ba8b27a/drift/imports/windows/moufiltr library BUILD=/workspace/scratch/7de47ba8b27a/drift/build/linux-verified/windows-objects CC=cc CFLAGS=-Os
+make: Entering directory '/workspace/scratch/7de47ba8b27a/drift/imports/windows/moufiltr'
+sha256sum -c SHA256SUMS
+upstream/moufiltr.c: OK
+upstream/moufiltr.h: OK
+upstream/LICENSE.MS-PL: OK
+mkdir -p "/workspace/scratch/7de47ba8b27a/drift/build/linux-verified/windows-objects"
+cc -I. -Icompat -std=c11 -Wall -Wextra -Werror -Wno-unknown-pragmas -Os -ffreestanding -fno-builtin -fno-stack-protector -fno-strict-aliasing -c compat.generated.c -o /workspace/scratch/7de47ba8b27a/drift/build/linux-verified/windows-objects/compat.o
+cc -I. -Icompat -std=c11 -Wall -Wextra -Werror -Wno-unknown-pragmas -Os -ffreestanding -fno-builtin -fno-stack-protector -fno-strict-aliasing -c driver.c -o /workspace/scratch/7de47ba8b27a/drift/build/linux-verified/windows-objects/driver.o
+ar rcs /workspace/scratch/7de47ba8b27a/drift/build/linux-verified/windows-objects/libdrift-windows-moufiltr.a /workspace/scratch/7de47ba8b27a/drift/build/linux-verified/windows-objects/compat.o /workspace/scratch/7de47ba8b27a/drift/build/linux-verified/windows-objects/driver.o
+make: Leaving directory '/workspace/scratch/7de47ba8b27a/drift/imports/windows/moufiltr'

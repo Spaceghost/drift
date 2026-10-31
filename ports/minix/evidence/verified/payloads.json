@@ -1,0 +1,14 @@
+{
+  "linux": {
+    "sha256": "d5d9793c50d626bb29c13a25ed011d6e8a2b6e2670098ef2e13ff7b2648fb23d",
+    "bytes": 218204
+  },
+  "windows": {
+    "sha256": "2c7a4be8eb4e8715ad4fb3fc85185e6f69fe3739598217fb463a9fd45ef45e38",
+    "bytes": 224916
+  },
+  "pio": {
+    "sha256": "02af679eb64092b04c71c22b283a0f5dae0690d1bf12fad9a2d117363dcb2d58",
+    "bytes": 239324
+  }
+}

@@ -1,0 +1,8 @@
+make: Entering directory '/workspace/scratch/7de47ba8b27a/drift/imports/linux/pcspkr'
+sha256sum -c SHA256SUMS
+upstream/pcspkr.c: OK
+upstream/COPYING.GPL-2.0: OK
+cc -m32 -std=c11 -Os -fno-strict-aliasing -fno-stack-protector -fno-pie -D__minix --sysroot=/workspace/scratch/7de47ba8b27a/drift/build/minix-public/sdk -isystem /workspace/scratch/7de47ba8b27a/drift/build/minix-public/sdk/usr/include -std=c11 -Wall -Wextra -Werror -Os -ffreestanding -fno-builtin -fno-stack-protector -fno-strict-aliasing -I. -Icompat -c compat.generated.c -o /workspace/scratch/7de47ba8b27a/drift/build/minix-public/linux-objects/compat.o
+cc -m32 -std=c11 -Os -fno-strict-aliasing -fno-stack-protector -fno-pie -D__minix --sysroot=/workspace/scratch/7de47ba8b27a/drift/build/minix-public/sdk -isystem /workspace/scratch/7de47ba8b27a/drift/build/minix-public/sdk/usr/include -std=c11 -Wall -Wextra -Werror -Wno-unused-parameter -Os -ffreestanding -fno-builtin -fno-stack-protector -fno-strict-aliasing -I. -Icompat -c driver.c -o /workspace/scratch/7de47ba8b27a/drift/build/minix-public/linux-objects/driver.o
+ar rcs /workspace/scratch/7de47ba8b27a/drift/build/minix-public/linux-objects/libdrift-linux-pcspkr.a /workspace/scratch/7de47ba8b27a/drift/build/minix-public/linux-objects/compat.o /workspace/scratch/7de47ba8b27a/drift/build/minix-public/linux-objects/driver.o
+make: Leaving directory '/workspace/scratch/7de47ba8b27a/drift/imports/linux/pcspkr'

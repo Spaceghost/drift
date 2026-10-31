@@ -63,9 +63,11 @@ must be coordinated with other timer/speaker users; permission to a port does
 not imply exclusive ownership of the whole controller. Do not steal the OS's
 clock device to make a demonstration work.
 
-Acceptance requires booting the selected Genode base platform, observing the
-actual guest I/O path, issuing tone/off requests, and testing suspend/remove
-and denied-resource paths. No Genode build or boot has been verified yet.
+The [verified Genode example](../ports/genode) boots the pinned base-hw guest,
+executes this unchanged driver through a real RPC service, checks actual QEMU
+port readback and lifecycle, and tests missing resource authority. Its matched
+reference measurements are recorded as service diagnostics, not a physical
+hardware qualification or an arbitrary Linux-driver environment.
 
 ## MINIX next
 
@@ -81,11 +83,12 @@ Publish requests through MINIX IPC and its appropriate driver library. The
 same PIT ownership constraint applies. Preserve kernel-call failures rather
 than inventing successful reads or writes.
 
-Acceptance requires a pinned MINIX image/toolchain, a real service launch in
-QEMU, request/reply tests, resource denial, teardown and restart. See MINIX's
+The [verified MINIX example](../ports/minix) boots a pinned image, runs a real
+RS-managed port-I/O service and verifies readback, resource denial and cleanup.
+It also runs the source models as separate native programs. See MINIX's
 [driver overview](https://wiki.minix3.org/doku.php?id=developersguide:overviewofminixdrivers)
 and [cross-build guide](https://wiki.minix3.org/doku.php?id=developersguide:crosscompiling).
-No MINIX build or boot has been verified yet.
+The recorded model and real-I/O results have separate scopes and timing limits.
 
 ## Then a useful DMA driver
 
