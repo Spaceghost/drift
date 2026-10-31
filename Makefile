@@ -15,7 +15,7 @@ NATIVE_OBJECTS = $(addprefix build/native-,$(addsuffix .o,$(NATIVE)))
 NATIVE_TESTS = $(addprefix build/test_,$(NATIVE))
 PUBLIC_HEADERS = include/drift.h include/drift_hw.h $(addprefix include/drift_,$(addsuffix .h,$(NATIVE)))
 
-.PHONY: all check example demo install sanitize freestanding freestanding32 regen verify-generated clean size FORCE native-check native-sanitize native-regen qemu-check kernel-check
+.PHONY: all check example demo install sanitize freestanding freestanding32 regen verify-generated clean size FORCE native-check native-sanitize native-regen qemu-check kernel-check linux-check linux-sanitize linux-regen linux-verify-generated
 all: build/drift build/drift-keyboard build/libdrift.a build/libdrift-native.a
 
 build:
@@ -62,6 +62,21 @@ qemu-check: all build/test_qemu
 
 kernel-check: all
 	sh tools/check-kernel.sh
+
+# Opt-in Linux-source compatibility proof. Never added to the MIT-only native
+# archive or default install: the upstream driver retains its GPL license.
+linux-check:
+	sh tests/check-linux-import.sh
+	$(MAKE) -C imports/linux/pcspkr check CC="$(CC)" AR="$(AR)" NM="$(NM)" CFLAGS="$(CFLAGS)"
+
+linux-sanitize:
+	$(MAKE) -C imports/linux/pcspkr sanitize CC="$(CC)"
+
+linux-regen:
+	$(MAKE) -C imports/linux/pcspkr regen NELUA="$(NELUA)"
+
+linux-verify-generated:
+	$(MAKE) -C imports/linux/pcspkr verify-generated NELUA="$(NELUA)"
 
 build/drift: hosts/posix.c build/drift.o include/drift.h build/module-path
 	$(CC) $(CPPFLAGS) $(WARN) $(CFLAGS) $< build/drift.o -o $@

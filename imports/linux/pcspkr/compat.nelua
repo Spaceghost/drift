@@ -1,0 +1,120 @@
+-- Small source-API compatibility runtime; not part of Drift's VM.
+-- SPDX-License-Identifier: MIT
+## pragmas.nogc = true
+## pragmas.noentrypoint = true
+## pragmas.nochecks = true
+## pragmas.nocstaticassert = true
+## pragmas.unitname = 'drift_linux_pcspkr'
+local Host: type <cimport 'drift_linux_pcspkr_host', cinclude '"pcspkr_compat.h"', forwarddecl> = @record{}
+local State: type <cimport 'drift_linux_pcspkr', cinclude '"pcspkr_compat.h"'> = @record{
+  host:*Host, phase:uint32, allocated:uint32, registered:uint32, locked:uint32,
+  error:int32, irq_flags:culong, input_slot:[32]uint64, platform_slot:[8]uint64
+}
+local Input: type <cimport 'drift_pcspkr_input', cinclude '"pcspkr_compat.h"', forwarddecl> = @record{}
+local function current():*State <cimport 'drift_lx_current',cinclude '"pcspkr_compat.h"'> end
+local function slot(s:*State):*Input <cimport 'drift_lx_slot',cinclude '"pcspkr_compat.h"'> end
+local function storage(s:*State):*[0]uint8 <cimport 'drift_lx_storage',cinclude '"pcspkr_compat.h"'> end
+local function owner(d:*Input,s:*State) <cimport 'drift_lx_set_owner',cinclude '"pcspkr_compat.h"'> end
+local function owned(d:*Input,s:*State):int32 <cimport 'drift_lx_is_owned',cinclude '"pcspkr_compat.h"'> end
+local function metadata(d:*Input,s:*State):int32 <cimport 'drift_lx_metadata_valid',cinclude '"pcspkr_compat.h"'> end
+local function host_valid(h:*Host):int32 <cimport 'drift_lx_host_valid',cinclude '"pcspkr_compat.h"'> end
+local function read(h:*Host,p:uint16):int32 <cimport 'drift_lx_host_read',cinclude '"pcspkr_compat.h"'> end
+local function write(h:*Host,p:uint16,v:uint8):int32 <cimport 'drift_lx_host_write',cinclude '"pcspkr_compat.h"'> end
+local function take(h:*Host,f:*culong):int32 <cimport 'drift_lx_host_lock',cinclude '"pcspkr_compat.h"'> end
+local function release(h:*Host,f:culong):int32 <cimport 'drift_lx_host_unlock',cinclude '"pcspkr_compat.h"'> end
+local function wait(h:*Host):int32 <cimport 'drift_lx_host_wait',cinclude '"pcspkr_compat.h"'> end
+local function fail(s:*State,error:int32)
+  if s ~= nilptr and s.error == 0 then s.error=error end
+end
+local function active():*State
+  local s=current()
+  if s == nilptr or s.host == nilptr then return nilptr end
+  return s
+end
+local function drift_lx_prepare(s:*State,h:*Host):int32 <cexport,codename 'drift_lx_prepare'>
+  if s == nilptr or host_valid(h) == 0 then return -22 end
+  if s.phase ~= 0 or s.allocated ~= 0 or s.registered ~= 0 or s.locked ~= 0 then return -16 end
+  s.host=h; s.error=0; s.phase=1; s.irq_flags=0
+  local p=storage(s)
+  for i:uint32=0,<320 do p[i]=0 end
+  return 0
+end
+local function drift_lx_finish(s:*State,result:int32):int32 <cexport,codename 'drift_lx_finish'>
+  if s.error ~= 0 then return s.error end
+  return result
+end
+local function drift_lx_input_allocate_device():*Input <cexport,codename 'drift_lx_input_allocate_device'>
+  local s=active()
+  if s == nilptr or s.phase ~= 1 or s.allocated ~= 0 then return nilptr end
+  local p=storage(s)
+  for i:uint32=0,<256 do p[i]=0 end
+  s.allocated=1
+  local d=slot(s); owner(d,s)
+  return d
+end
+local function drift_lx_input_register_device(d:*Input):int32 <cexport,codename 'drift_lx_input_register_device'>
+  local s=active()
+  if s == nilptr or d == nilptr or s.allocated == 0 or s.registered ~= 0 then return -22 end
+  if owned(d,s) == 0 or metadata(d,s) == 0 then return -22 end
+  s.registered=1
+  return 0
+end
+local function drift_lx_input_free_device(d:*Input) <cexport,codename 'drift_lx_input_free_device'>
+  local s=active()
+  if s == nilptr then return end
+  if d == nilptr or s.allocated == 0 or s.registered ~= 0 then fail(s,-22); return end
+  if owned(d,s) == 0 then fail(s,-22); return end
+  s.allocated=0
+end
+local function drift_lx_input_unregister_device(d:*Input) <cexport,codename 'drift_lx_input_unregister_device'>
+  local s=active()
+  if s == nilptr then return end
+  if d == nilptr or s.allocated == 0 or s.registered == 0 then fail(s,-22); return end
+  if owned(d,s) == 0 then fail(s,-22); return end
+  -- The source does not access the input device after unregistering it.
+  s.registered=0; s.allocated=0
+end
+local function drift_lx_lock():culong <cexport,codename 'drift_lx_lock'>
+  local s=active(); local flags:culong=0
+  if s == nilptr then return 0 end
+  if s.error ~= 0 then return 0 end
+  if s.locked ~= 0 then fail(s,-16); return 0 end
+  local result=take(s.host,&flags)
+  if result ~= 0 then fail(s,result < 0 and result or -5); return 0 end
+  s.locked=1; s.irq_flags=flags
+  return flags
+end
+local function drift_lx_unlock(flags:culong) <cexport,codename 'drift_lx_unlock'>
+  local s=active()
+  if s == nilptr then return end
+  if s.locked == 0 then if s.error == 0 then fail(s,-22) end; return end
+  local result=release(s.host,flags)
+  -- A failed unlock means the host still owns recovery; future entry is barred.
+  if result ~= 0 then fail(s,result < 0 and result or -5); return end
+  s.locked=0
+end
+local function drift_lx_inb(port:uint16):uint8 <cexport,codename 'drift_lx_inb'>
+  local s=active()
+  if s == nilptr then return 0 end
+  if s.error ~= 0 then return 0 end
+  if s.locked == 0 or port ~= 0x61 then fail(s,-22); return 0 end
+  local result=read(s.host,port)
+  if result < 0 or result > 255 then fail(s,result < 0 and result or -5); return 0 end
+  return uint8(result)
+end
+local function drift_lx_outb(value:uint8,port:uint16) <cexport,codename 'drift_lx_outb'>
+  local s=active()
+  if s == nilptr then return end
+  if s.error ~= 0 then return end
+  if s.locked == 0 or (port ~= 0x42 and port ~= 0x43 and port ~= 0x61) then fail(s,-22); return end
+  local result=write(s.host,port,value)
+  if result ~= 0 then fail(s,result < 0 and result or -5) end
+end
+local function drift_lx_delay() <cexport,codename 'drift_lx_delay'>
+  local s=active()
+  if s == nilptr then return end
+  if s.error ~= 0 then return end
+  if s.locked == 0 then fail(s,-22); return end
+  local result=wait(s.host)
+  if result ~= 0 then fail(s,result < 0 and result or -5) end
+end

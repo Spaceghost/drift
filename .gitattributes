@@ -1,2 +1,4 @@
+* text=auto eol=lf
 generated/*.c linguist-generated=true whitespace=-blank-at-eof
 modules/*.drv binary
+imports/**/upstream/** -text

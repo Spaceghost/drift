@@ -46,6 +46,11 @@ model tests are evidence for those paths; physical hardware remains unqualified.
 
 ## Put them in an OS
 
+Want to reuse an existing Linux driver? See the
+[unchanged-source import boundary](docs/linux-imports.md), its first compatibility
+profile, and the Genode/MINIX acceptance plan. This is separate from the native
+Nelua drivers below; it is not a loader for Linux kernel modules.
+
 The common [resource interface](include/drift_hw.h) has callbacks for register
 access, coherent DMA allocation, synchronization and time. Drivers own their
 commands, queues and resets. [Portable PCI helpers](include/drift_pci.h) provide

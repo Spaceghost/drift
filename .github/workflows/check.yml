@@ -8,7 +8,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: make check sanitize native-sanitize freestanding size
+      - run: make linux-check linux-sanitize
       - run: sudo apt-get update && sudo apt-get install -y qemu-system-x86
       - run: make qemu-check kernel-check
       - run: sh tools/bootstrap.sh
       - run: make verify-generated NELUA="$PWD/.toolchain/nelua/nelua"
+      - run: make linux-verify-generated NELUA="$PWD/.toolchain/nelua/nelua"
+  windows-model:
+    name: Windows native host model (not a kernel/device test)
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            make
+            mingw-w64-ucrt-x86_64-gcc
+      - shell: msys2 {0}
+        run: make linux-check CC=gcc

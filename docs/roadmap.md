@@ -34,6 +34,11 @@ Linux, Windows and BSD drivers depend on their kernels' APIs, scheduling,
 memory and synchronization models. Reusing those drivers is a separate
 compatibility project, not a feature hidden inside this interpreter.
 
+The first bounded [Linux source-import profile](linux-imports.md) starts that
+separate compatibility work. It preserves the upstream source and exercises
+the required API subset. Actual Genode and MINIX ports remain acceptance work;
+host-model tests do not establish either port.
+
 Related work worth studying before expanding scope includes UDI, DDE/DDEKit,
 rump kernels, WebAssembly runtimes, eBPF interpreters, libusb and libsigrok.
 Drift's present contribution is a tiny, complete implementation of its own
