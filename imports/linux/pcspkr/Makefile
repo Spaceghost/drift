@@ -34,7 +34,9 @@ $(BUILD)/test: test.c $(BUILD)/compat.o $(BUILD)/driver.o
 check: library $(BUILD)/test
 	$(BUILD)/test
 	$(CC) -nostdlib -r $(BUILD)/compat.o $(BUILD)/driver.o -o $(BUILD)/linked.o
-	test -z "$$($(NM) -u $(BUILD)/linked.o)"
+	$(NM) -u $(BUILD)/linked.o > $(BUILD)/undefined-symbols.txt
+	cat $(BUILD)/undefined-symbols.txt
+	test ! -s $(BUILD)/undefined-symbols.txt
 	@if $(CC) $(WARN) $(INCLUDES) -c unsupported.c -o $(BUILD)/unsupported.o >$(BUILD)/unsupported.log 2>&1; then \
 	  echo 'unsupported Linux API unexpectedly compiled'; exit 1; \
 	fi

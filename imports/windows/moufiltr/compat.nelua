@@ -1,0 +1,201 @@
+-- Bounded KMDF source profile. No global active context or hidden scheduler.
+-- SPDX-License-Identifier: MIT
+## pragmas.nogc = true
+## pragmas.noentrypoint = true
+## pragmas.nochecks = true
+## pragmas.nocstaticassert = true
+## pragmas.unitname = 'drift_windows_moufiltr'
+local Host: type <cimport 'drift_win_mou_host',cinclude '"wdf_compat.h"',forwarddecl> = @record{}
+-- Imported records name fields directly in C; typed callback/storage members
+-- are accessed through ABI helpers. No raw record layout arithmetic is used.
+local State: type <cimport 'drift_win_moufiltr',cinclude '"wdf_compat.h"'> = @record{
+  host:*Host,phase:uint32,outstanding:uint32,depth:uint32,filter:uint32,device_type:uint32,error:int32
+}
+local Object: type <cimport 'drift_win_mou_object',cinclude '"wdf_compat.h"'> = @record{owner:*State,kind:uint32}
+local Request: type <cimport 'drift_win_mou_request',cinclude '"wdf_compat.h"'> = @record{
+  owner:*State,phase:uint32,dispatching:uint32,completions:uint32,control:uint32,
+  status:int32,error:int32,input:pointer,input_length:csize,information:usize
+}
+local INVALID:int32=-1073741811
+local INVALID_STATE:int32=-1073741436
+local INVALID_HANDLE:int32=-1073741816
+local BUSY:int32=-2147483631
+local TOO_SMALL:int32=-1073741789
+local PENDING:int32=0x103
+local function host_valid(h:*Host):int32 <cimport 'drift_mou_host_valid',cinclude '"wdf_compat.h"'> end
+local function object_init(s:*State) <cimport 'drift_mou_object_init',cinclude '"wdf_compat.h"'> end
+local function object(s:*State,k:uint32):*Object <cimport 'drift_mou_object',cinclude '"wdf_compat.h"'> end
+local function config_valid(c:pointer):int32 <cimport 'drift_mou_config_valid',cinclude '"wdf_compat.h"'> end
+local function save_config(s:*State,c:pointer) <cimport 'drift_mou_save_config',cinclude '"wdf_compat.h"'> end
+local function attrs_valid(a:pointer):int32 <cimport 'drift_mou_attributes_valid',cinclude '"wdf_compat.h"'> end
+local function queue_valid(c:pointer):int32 <cimport 'drift_mou_queue_valid',cinclude '"wdf_compat.h"'> end
+local function save_queue(s:*State,c:pointer) <cimport 'drift_mou_save_queue',cinclude '"wdf_compat.h"'> end
+local function send_valid(c:pointer):int32 <cimport 'drift_mou_send_valid',cinclude '"wdf_compat.h"'> end
+local function device_result(i:*[0]*Object,d:*[0]*Object,s:*State) <cimport 'drift_mou_device_result',cinclude '"wdf_compat.h"'> end
+local function lower_send(s:*State,r:*Request):int32 <cimport 'drift_mou_lower_send',cinclude '"wdf_compat.h"'> end
+local function notify(s:*State,r:*Request) <cimport 'drift_mou_notify',cinclude '"wdf_compat.h"'> end
+local function extension(s:*State):pointer <cimport 'drift_mou_extension',cinclude '"wdf_compat.h"'> end
+local function buffer_valid(r:*Request):int32 <cimport 'drift_mou_buffer_valid',cinclude '"wdf_compat.h"'> end
+local function buffer_result(r:*Request,p:*pointer,n:*csize) <cimport 'drift_mou_buffer_result',cinclude '"wdf_compat.h"'> end
+local function owner(o:*Object,k:uint32):*State
+  if o == nilptr or o.owner == nilptr or o.kind ~= k then return nilptr end
+  if o ~= object(o.owner,k) then return nilptr end
+  return o.owner
+end
+local function valid(r:*Request):boolean
+  return r ~= nilptr and r.owner ~= nilptr and r.owner.phase == 4
+end
+local function finish_request(r:*Request,status:int32,information:usize):int32
+  if not valid(r) or r.phase ~= 1 and r.phase ~= 2 or r.completions ~= 0 then return INVALID_STATE end
+  if status == PENDING then return INVALID end
+  local s=r.owner
+  if s.outstanding == 0 then return INVALID_STATE end
+  r.phase=3; r.status=status; r.information=information; r.completions=1
+  s.outstanding=s.outstanding-1
+  -- State is published before notification; nested dispatch gets its own request.
+  s.depth=s.depth+1
+  r.dispatching=r.dispatching+1
+  notify(s,r)
+  r.dispatching=r.dispatching-1
+  s.depth=s.depth-1
+  return 0
+end
+local function drift_mou_prepare(s:*State,h:*Host):int32 <cexport,codename 'drift_mou_prepare'>
+  if s == nilptr or host_valid(h) == 0 then return INVALID end
+  if s.phase ~= 0 or s.outstanding ~= 0 or s.depth ~= 0 then return BUSY end
+  s.host=h; s.phase=1; s.filter=0; s.device_type=0; s.error=0
+  object_init(s)
+  return 0
+end
+local function drift_mou_open_finish(s:*State,status:int32):int32 <cexport,codename 'drift_mou_open_finish'>
+  if s.error ~= 0 then status=s.error end
+  if status >= 0 and s.phase ~= 4 then status=INVALID_STATE end
+  if status < 0 then s.phase=0; s.host=nilptr; object_init(s) end
+  return status
+end
+local function WdfDriverCreate(o:*Object,registry:pointer,attrs:pointer,config:pointer,result:*[0]*Object):int32 <cexport,codename 'WdfDriverCreate'>
+  local s=owner(o,6)
+  if s == nilptr or s.phase ~= 1 or attrs ~= nilptr or config_valid(config) == 0 then return INVALID end
+  save_config(s,config); s.phase=2
+  if result ~= nilptr then result[0]=object(s,1) end
+  return 0
+end
+local function WdfFdoInitSetFilter(i:*Object) <cexport,codename 'WdfFdoInitSetFilter'>
+  local s=owner(i,5)
+  if s == nilptr then return end
+  if s.phase ~= 2 then s.error=INVALID_STATE; return end
+  s.filter=1
+end
+local function WdfDeviceInitSetDeviceType(i:*Object,t:uint32) <cexport,codename 'WdfDeviceInitSetDeviceType'>
+  local s=owner(i,5)
+  if s == nilptr then return end
+  if s.phase ~= 2 or t ~= 15 then s.error=INVALID; return end
+  s.device_type=t
+end
+local function WdfDeviceCreate(i:*[0]*Object,attrs:pointer,result:*[0]*Object):int32 <cexport,codename 'WdfDeviceCreate'>
+  if i == nilptr or result == nilptr then return INVALID end
+  local s=owner(i[0],5)
+  if s == nilptr or s.phase ~= 2 or s.filter ~= 1 or s.device_type ~= 15 or s.error ~= 0 then return INVALID_STATE end
+  if attrs_valid(attrs) == 0 then return INVALID end
+  device_result(i,result,s); s.phase=3
+  return 0
+end
+local function WdfIoQueueCreate(d:*Object,config:pointer,attrs:pointer,result:*[0]*Object):int32 <cexport,codename 'WdfIoQueueCreate'>
+  local s=owner(d,2)
+  if s == nilptr or s.phase ~= 3 then return INVALID_STATE end
+  if queue_valid(config) == 0 or attrs ~= nilptr then return INVALID end
+  save_queue(s,config); s.phase=4
+  if result ~= nilptr then result[0]=object(s,3) end
+  return 0
+end
+local function WdfIoQueueGetDevice(q:*Object):*Object <cexport,codename 'WdfIoQueueGetDevice'>
+  local s=owner(q,3)
+  if s == nilptr or s.phase ~= 4 then return nilptr end
+  return object(s,2)
+end
+local function WdfDeviceGetIoTarget(d:*Object):*Object <cexport,codename 'WdfDeviceGetIoTarget'>
+  local s=owner(d,2)
+  if s == nilptr or s.phase ~= 4 then return nilptr end
+  return object(s,4)
+end
+local function WdfDeviceWdmGetDeviceObject(d:*Object):*Object <cexport,codename 'WdfDeviceWdmGetDeviceObject'>
+  local s=owner(d,2)
+  if s == nilptr or s.phase ~= 4 then return nilptr end
+  return object(s,7)
+end
+local function WdfWdmDeviceGetWdfDeviceHandle(d:*Object):*Object <cexport,codename 'WdfWdmDeviceGetWdfDeviceHandle'>
+  local s=owner(d,7)
+  if s == nilptr or s.phase ~= 4 then return nilptr end
+  return object(s,2)
+end
+local function drift_wdf_context(d:*Object):pointer <cexport,codename 'drift_wdf_context'>
+  local s=owner(d,2)
+  if s == nilptr or s.phase ~= 4 then return nilptr end
+  return extension(s)
+end
+local function WdfRequestRetrieveInputBuffer(r:*Request,minimum:csize,result:pointer,length:*csize):int32 <cexport,codename 'WdfRequestRetrieveInputBuffer'>
+  if not valid(r) or r.phase ~= 1 or result == nilptr then return INVALID_STATE end
+  if r.input_length < minimum then return TOO_SMALL end
+  if buffer_valid(r) == 0 then return INVALID end
+  buffer_result(r,(@*pointer)(result),length)
+  return 0
+end
+local function WdfRequestGetStatus(r:*Request):int32 <cexport,codename 'WdfRequestGetStatus'>
+  if not valid(r) then return INVALID_HANDLE end
+  return r.status
+end
+local function WdfRequestComplete(r:*Request,status:int32) <cexport,codename 'WdfRequestComplete'>
+  if not valid(r) then return end
+  if r.phase ~= 1 then r.error=INVALID_STATE; return end
+  local result=finish_request(r,status,0)
+  if result ~= 0 then r.error=result end
+end
+local function WdfRequestSend(r:*Request,target:*Object,options:pointer):uint8 <cexport,codename 'WdfRequestSend'>
+  if not valid(r) then return 0 end
+  local s=owner(target,4)
+  if s == nilptr or s ~= r.owner or r.phase ~= 1 or send_valid(options) == 0 then r.status=INVALID; return 0 end
+  r.phase=2
+  local status=lower_send(s,r)
+  if status < 0 then
+    if r.phase ~= 2 then r.error=INVALID_STATE; return 1 end
+    r.phase=1; r.status=status
+    return 0
+  end
+  return 1
+end
+local function drift_mou_begin(s:*State,r:*Request,code:uint32,input:pointer,length:csize):int32 <cexport,codename 'drift_mou_begin'>
+  if s == nilptr or r == nilptr or s.phase ~= 4 then return INVALID_STATE end
+  if r.phase ~= 0 or r.dispatching ~= 0 or r.owner ~= nilptr then return BUSY end
+  if s.outstanding >= 64 or s.depth >= 64 then return BUSY end
+  r.owner=s; r.phase=1; r.dispatching=1; r.completions=0; r.control=code
+  r.status=PENDING; r.error=0; r.input=input; r.input_length=length; r.information=0
+  s.outstanding=s.outstanding+1; s.depth=s.depth+1
+  return 0
+end
+local function drift_mou_end(r:*Request):int32 <cexport,codename 'drift_mou_end'>
+  if not valid(r) or r.dispatching ~= 1 then return INVALID_STATE end
+  r.dispatching=0; r.owner.depth=r.owner.depth-1
+  if r.error ~= 0 then return r.error end
+  if r.phase == 2 then return PENDING end
+  if r.phase == 3 then return r.status end
+  return INVALID_STATE
+end
+local function drift_windows_moufiltr_complete(r:*Request,status:int32,information:usize):int32 <cexport,codename 'drift_windows_moufiltr_complete'>
+  if r == nilptr or r.phase ~= 2 then return INVALID_STATE end
+  if not valid(r) then return INVALID_STATE end
+  return finish_request(r,status,information)
+end
+local function drift_windows_moufiltr_request_reset(r:*Request):int32 <cexport,codename 'drift_windows_moufiltr_request_reset'>
+  if r == nilptr then return INVALID end
+  if r.phase ~= 3 or r.dispatching ~= 0 then return BUSY end
+  r.owner=nilptr; r.phase=0; r.completions=0; r.error=0; r.status=0
+  r.control=0; r.input=nilptr; r.input_length=0; r.information=0
+  return 0
+end
+local function drift_windows_moufiltr_close(s:*State):int32 <cexport,codename 'drift_windows_moufiltr_close'>
+  if s == nilptr or s.phase ~= 4 then return INVALID_STATE end
+  if s.outstanding ~= 0 or s.depth ~= 0 then return BUSY end
+  s.phase=0; s.host=nilptr; s.filter=0; s.device_type=0; s.error=0
+  object_init(s)
+  return 0
+end

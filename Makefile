@@ -15,7 +15,7 @@ NATIVE_OBJECTS = $(addprefix build/native-,$(addsuffix .o,$(NATIVE)))
 NATIVE_TESTS = $(addprefix build/test_,$(NATIVE))
 PUBLIC_HEADERS = include/drift.h include/drift_hw.h $(addprefix include/drift_,$(addsuffix .h,$(NATIVE)))
 
-.PHONY: all check example demo install sanitize freestanding freestanding32 regen verify-generated clean size FORCE native-check native-sanitize native-regen qemu-check kernel-check linux-check linux-sanitize linux-regen linux-verify-generated
+.PHONY: all check example demo install sanitize freestanding freestanding32 regen verify-generated clean size FORCE native-check native-sanitize native-regen qemu-check kernel-check linux-check linux-sanitize linux-regen linux-verify-generated windows-check windows-sanitize windows-regen windows-verify-generated
 all: build/drift build/drift-keyboard build/libdrift.a build/libdrift-native.a
 
 build:
@@ -77,6 +77,19 @@ linux-regen:
 
 linux-verify-generated:
 	$(MAKE) -C imports/linux/pcspkr verify-generated NELUA="$(NELUA)"
+
+# A separate closed KMDF source profile, not an NT kernel or .sys loader.
+windows-check:
+	$(MAKE) -C imports/windows/moufiltr check lto-check CC="$(CC)" AR="$(AR)" NM="$(NM)" CFLAGS="$(CFLAGS)"
+
+windows-sanitize:
+	$(MAKE) -C imports/windows/moufiltr sanitize CC="$(CC)"
+
+windows-regen:
+	$(MAKE) -C imports/windows/moufiltr regen NELUA="$(NELUA)"
+
+windows-verify-generated:
+	$(MAKE) -C imports/windows/moufiltr verify-generated NELUA="$(NELUA)"
 
 build/drift: hosts/posix.c build/drift.o include/drift.h build/module-path
 	$(CC) $(CPPFLAGS) $(WARN) $(CFLAGS) $< build/drift.o -o $@

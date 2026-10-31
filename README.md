@@ -1,6 +1,6 @@
 # Drift
 
-**Device drivers that travel between operating systems. Written in Nelua.**
+**Device drivers that travel between operating systems. Built with Nelua.**
 
 Give Drift register access, DMA memory and a clock. Its native drivers handle
 the controller. Link the generated C into your kernel; no Nelua installation,
@@ -46,10 +46,17 @@ model tests are evidence for those paths; physical hardware remains unqualified.
 
 ## Put them in an OS
 
-Want to reuse an existing Linux driver? See the
+Want to reuse Linux or Windows driver source? See the
 [unchanged-source import boundary](docs/linux-imports.md), its first compatibility
-profile, and the Genode/MINIX acceptance plan. This is separate from the native
+profile, and the [Linux/Windows target and qualification plan](docs/compatibility.md).
+This is separate from the native
 Nelua drivers below; it is not a loader for Linux kernel modules.
+
+The first opt-in profiles compile an unchanged
+[Linux PC-speaker driver](imports/linux/pcspkr) and
+[Windows KMDF mouse filter](imports/windows/moufiltr). Their compatibility
+runtimes are Nelua. Source/profile tests establish their documented API subsets;
+they do not establish arbitrary `.ko`/`.sys` loading or hardware support.
 
 The common [resource interface](include/drift_hw.h) has callbacks for register
 access, coherent DMA allocation, synchronization and time. Drivers own their
