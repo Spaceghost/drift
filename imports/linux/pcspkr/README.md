@@ -51,6 +51,10 @@ the exact independent PIT/port transcript, bell/tone ranges, upper control-bit
 preservation, suspend/shutdown/remove, allocation and registration failures,
 every resource failure, recovery, reentry and a real competing pthread. The
 linked object has no undefined symbols. Sanitizers check host execution.
+For the GNU MinGW COFF partial-link audit only, runtime DLL-data pseudo
+relocations are disabled; this avoids synthesizing a CRT relocation helper.
+The strict zero-undefined-symbol check remains, and the executable model tests
+retain their normal platform linker behavior.
 
 **Status:** host model proof only. No PC speaker hardware, QEMU device, Genode
 component or MINIX service has been booted by these tests. Both OSes still

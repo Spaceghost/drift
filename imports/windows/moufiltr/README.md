@@ -67,6 +67,11 @@ with C size/alignment assertions. The combined normal objects have no undefined
 symbols, allocator, Nelua startup or hidden threads. A host-model pass is not
 Windows kernel loading, hardware qualification or a Genode/MINIX port.
 
+The MinGW-only relocatable-link audit disables GNU PE runtime pseudo-relocations
+so the linker does not synthesize an unrelated CRT helper. The audit still saves
+the full undefined-symbol output and requires it to be empty; normal library
+and executable flags and all behavior tests are unchanged.
+
 Microsoft's [sample documentation](https://learn.microsoft.com/en-us/samples/microsoft/windows-driver-samples/mouse-input-wdf-filter-driver-moufiltr/)
 and [hook IOCTL contract](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntdd8042/ni-ntdd8042-ioctl_internal_i8042_hook_mouse)
 describe the original Windows integration. Preserve a source/kernel/profile

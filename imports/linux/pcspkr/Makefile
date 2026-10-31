@@ -9,6 +9,11 @@ INCLUDES = -I. -Icompat
 # The imported kernel source uses a fixed caller-owned arena for Linux objects.
 # Match Linux's aliasing model; these flags do not affect Drift's MIT libraries.
 CORE = -ffreestanding -fno-builtin -fno-stack-protector -fno-strict-aliasing
+# MinGW's PE linker otherwise synthesizes a CRT pseudo-relocation helper even
+# for this relocatable audit object. No DLL data imports are permitted here.
+ifneq ($(findstring mingw,$(shell $(CC) -dumpmachine)),)
+PARTIAL_LINK_FLAGS = -Wl,--disable-runtime-pseudo-reloc
+endif
 
 .PHONY: all library check sanitize regen verify-generated source-check
 all: library
@@ -33,7 +38,7 @@ $(BUILD)/test: test.c $(BUILD)/compat.o $(BUILD)/driver.o
 	$(CC) $(WARN) $(CFLAGS) -fno-strict-aliasing $(INCLUDES) $^ -pthread -Wl,--wrap=drift_lx_input_allocate_device -Wl,--wrap=drift_lx_input_register_device -o $@
 check: library $(BUILD)/test
 	$(BUILD)/test
-	$(CC) -nostdlib -r $(BUILD)/compat.o $(BUILD)/driver.o -o $(BUILD)/linked.o
+	$(CC) -nostdlib -r $(PARTIAL_LINK_FLAGS) $(BUILD)/compat.o $(BUILD)/driver.o -o $(BUILD)/linked.o
 	$(NM) -u $(BUILD)/linked.o > $(BUILD)/undefined-symbols.txt
 	cat $(BUILD)/undefined-symbols.txt
 	test ! -s $(BUILD)/undefined-symbols.txt

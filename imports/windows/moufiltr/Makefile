@@ -12,6 +12,12 @@ WARN := -std=c11 -Wall -Wextra -Werror -Wno-unknown-pragmas
 CORE := -ffreestanding -fno-builtin -fno-stack-protector -fno-strict-aliasing
 HEADERS := drift_windows_moufiltr.h $(wildcard compat/*.h) upstream/moufiltr.h
 WRAP := -Wl,--wrap=WdfDriverCreate,--wrap=WdfDeviceCreate,--wrap=WdfIoQueueCreate
+# GNU PE partial linking otherwise synthesizes a CRT pseudo-relocation helper
+# even for these self-contained objects. This changes only the audit artifact.
+AUDIT_LDFLAGS :=
+ifneq ($(findstring mingw,$(shell $(CC) -dumpmachine)),)
+AUDIT_LDFLAGS := -Wl,--disable-runtime-pseudo-reloc
+endif
 .PHONY: check sanitize regen verify-generated library clean closed-api lto-check verify-upstream
 verify-upstream:
 	sha256sum -c SHA256SUMS
@@ -30,7 +36,7 @@ $(BUILD)/test: tests.c $(BUILD)/libdrift-windows-moufiltr.a $(HEADERS)
 check: library $(BUILD)/test closed-api
 	sha256sum -c SHA256SUMS
 	$(BUILD)/test
-	$(CC) -nostdlib -r $(BUILD)/driver.o $(BUILD)/compat.o -o $(BUILD)/linked.o
+	$(CC) -nostdlib -r $(AUDIT_LDFLAGS) $(BUILD)/driver.o $(BUILD)/compat.o -o $(BUILD)/linked.o
 	$(NM) -u $(BUILD)/linked.o > $(BUILD)/undefined-symbols.txt
 	cat $(BUILD)/undefined-symbols.txt
 	test ! -s $(BUILD)/undefined-symbols.txt
