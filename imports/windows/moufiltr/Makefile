@@ -12,11 +12,11 @@ WARN := -std=c11 -Wall -Wextra -Werror -Wno-unknown-pragmas
 CORE := -ffreestanding -fno-builtin -fno-stack-protector -fno-strict-aliasing
 HEADERS := drift_windows_moufiltr.h $(wildcard compat/*.h) upstream/moufiltr.h
 WRAP := -Wl,--wrap=WdfDriverCreate,--wrap=WdfDeviceCreate,--wrap=WdfIoQueueCreate
-# GNU PE partial linking otherwise synthesizes a CRT pseudo-relocation helper
-# even for these self-contained objects. This changes only the audit artifact.
+# GNU PE's plugin hook adds a CRT helper when auto-import is enabled, even
+# without pseudo-relocations. Disable both only for this static object audit.
 AUDIT_LDFLAGS :=
 ifneq ($(findstring mingw,$(shell $(CC) -dumpmachine)),)
-AUDIT_LDFLAGS := -Wl,--disable-runtime-pseudo-reloc
+AUDIT_LDFLAGS := -Wl,--disable-runtime-pseudo-reloc,--disable-auto-import
 endif
 .PHONY: check sanitize regen verify-generated library clean closed-api lto-check verify-upstream
 verify-upstream:

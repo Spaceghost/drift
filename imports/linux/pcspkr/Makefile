@@ -9,10 +9,11 @@ INCLUDES = -I. -Icompat
 # The imported kernel source uses a fixed caller-owned arena for Linux objects.
 # Match Linux's aliasing model; these flags do not affect Drift's MIT libraries.
 CORE = -ffreestanding -fno-builtin -fno-stack-protector -fno-strict-aliasing
-# MinGW's PE linker otherwise synthesizes a CRT pseudo-relocation helper even
-# for this relocatable audit object. No DLL data imports are permitted here.
+# MinGW's PE linker synthesizes a CRT relocation helper when its LTO plugin
+# and automatic DLL data importing are enabled, even for a relocatable audit.
+# Neither automatic DLL imports nor runtime pseudo-relocations belong here.
 ifneq ($(findstring mingw,$(shell $(CC) -dumpmachine)),)
-PARTIAL_LINK_FLAGS = -Wl,--disable-runtime-pseudo-reloc
+PARTIAL_LINK_FLAGS = -Wl,--disable-auto-import,--disable-runtime-pseudo-reloc
 endif
 
 .PHONY: all library check sanitize regen verify-generated source-check
