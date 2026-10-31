@@ -1,0 +1,5 @@
+repository=https://github.com/torvalds/linux
+commit=7d0a66e4bb9081d75c82ec4957c50034cb0ea449
+tag=v6.18
+path=drivers/char/hw_random/virtio-rng.c
+license=GPL-2.0-or-later

@@ -7,7 +7,10 @@ profiles. Rebuild for each OS/architecture. Kernel-module binary compatibility
 
 The first Linux profile imports [PC speaker](linux-imports.md). The first
 Windows profile imports Microsoft's [KMDF mouse filter](../imports/windows/moufiltr).
-These are small compatibility proofs, not the high-value device lineup. Windows requires its
+Useful DMA profiles now import unchanged Linux
+[`virtio-rng.c`](../imports/linux/virtio-rng) and Virtio-Windows
+[`viorng`](../imports/windows/viorng) against the same generic Nelua queue
+transport. These remain selected compatibility profiles. Windows requires its
 own API family: WDM, KMDF, NDIS, StorPort and UMDF are different contracts.
 Providing a few familiar function names does not implement them.
 
@@ -92,6 +95,8 @@ a component benchmark, not a hardware-driver shootout.
 ```sh
 make linux-check windows-check
 make linux-sanitize windows-sanitize
+make linux-rng-check windows-rng-check
+make linux-rng-sanitize windows-rng-sanitize
 make linux-bench
 python3 ports/linux/run.py
 python3 ports/minix/run.py
@@ -112,7 +117,15 @@ register sequence; none is a full native-kernel driver stack. Different trial
 sizes and guest configurations preclude an OS ranking. Short timer/emulator
 measurements establish no speed advantage.
 
-The source profiles above are implemented. The network/storage/DMA targets in
-the selection table are **not yet imported or qualified**. Windows kernel
+The four source profiles above are implemented. The RNG recipes in
+[Linux/Windows](../ports/linux/virtio-rng), [MINIX](../ports/minix/virtio-rng)
+and [Genode](../ports/genode/virtio-rng) test actual emulated PCI, rings and
+DMA. Consult each recipe's evidence and scope before treating a target as
+qualified. Linux source stores a pointer in `unsigned long`, so this profile
+requires LP64 or ILP32; native Windows x64 LLP64 is rejected. A native i686
+Windows executable is the supported Windows ABI for that Linux source profile.
+
+Network and storage source targets in the selection table are **not yet
+imported or qualified**. Windows kernel
 loading, general WDF/NDIS/StorPort compatibility and physical device
 qualification remain unverified. Do not infer those from a green host-model job.

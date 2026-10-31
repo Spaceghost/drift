@@ -1,0 +1,5 @@
+upstream/* -text
+SOURCE text eol=lf
+SHA256SUMS text eol=lf
+compat.nelua text eol=lf
+compat.generated.c text eol=lf

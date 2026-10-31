@@ -1,0 +1,2 @@
+/* WPP-off profile output; no Windows ETW registration. SPDX-License-Identifier: MIT */
+#include "types.h"

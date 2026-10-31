@@ -7,10 +7,21 @@
 extern "C" {
 #endif
 
+/* One externally owned coherent DMA range. Keep this context and its mapping
+ * alive and immutable until get or a successful device reset. Native close
+ * never releases this external allocation. */
+typedef struct drift_virtio_raw_transfer {
+    drift_dma mapping;
+    void *cookie, *owner;
+    uint64_t started_us;
+    uint32_t queue, offset, length, direction, active;
+} drift_virtio_raw_transfer;
+
 typedef struct drift_virtqueue {
     drift_dma ring, buffer;
     uint16_t available, used;
     uint32_t notify, pending, capacity;
+    drift_virtio_raw_transfer *raw;
 } drift_virtqueue;
 
 typedef struct drift_virtio {
@@ -48,6 +59,32 @@ typedef struct drift_virtio_bar {
 int32_t drift_virtio_open_function(drift_virtio *,drift_hw *,drift_pci *,
                                   uint32_t bdf,drift_virtio_bar *bindings);
 int32_t drift_virtio_close(drift_virtio *);
+/* Bounded generic split-queue transport for source compatibility frameworks.
+ * Negotiate VERSION_1 with no device-specific features; one or two queues,
+ * one descriptor/in-flight transfer per queue. Deferred open leaves DRIVER_OK
+ * unset (state 4). device_ready enters raw-active state 5. Existing class
+ * operations require their separate state 2 and cannot consume raw queues.
+ * Host maps/registers/DMAs/time are the only platform services involved. */
+int32_t drift_virtio_raw_open_mmio(drift_virtio *, drift_hw *, uint32_t region,
+    uint32_t expected_id, uint32_t queues);
+int32_t drift_virtio_raw_open_pci(drift_virtio *, drift_hw *, uint32_t common_region,
+    uint32_t common_offset, uint32_t notify_region, uint32_t notify_offset,
+    uint32_t notify_multiplier, uint32_t device_region, uint32_t device_offset,
+    uint32_t expected_id, uint32_t queues);
+int32_t drift_virtio_raw_open_function(drift_virtio *,drift_hw *,drift_pci *,
+    uint32_t bdf,drift_virtio_bar *,uint32_t expected_id,uint32_t queues);
+int32_t drift_virtio_raw_device_ready(drift_virtio *);
+/* add publishes one buffer but does not notify. direction is TO_DEVICE or
+ * FROM_DEVICE. DMA must meet drift_hw's coherent/uncached contract and belong
+ * to this device's host domain. The context snapshots its mapping metadata.
+ * get returns 1 once with cookie/used length after DMA acquisition, 0 pending
+ * or no transfer, or a negative error. A timeout/malformed completion resets
+ * before reclamation; on failed reset retain all external resources. */
+int32_t drift_virtio_raw_add(drift_virtio *,uint32_t,drift_virtio_raw_transfer *,
+    drift_dma *,uint32_t offset,uint32_t length,uint32_t direction,void *cookie);
+int32_t drift_virtio_raw_kick(drift_virtio *,uint32_t);
+int32_t drift_virtio_raw_get(drift_virtio *,uint32_t,drift_virtio_raw_transfer *,
+    void **cookie,uint32_t *used_length);
 /* Sectors are always 512 bytes; count 1..128; copied synchronously. */
 int32_t drift_virtio_block(drift_virtio *, uint64_t sector, uint32_t count, uint8_t *, int32_t write);
 int32_t drift_virtio_flush(drift_virtio *);

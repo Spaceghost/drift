@@ -1,0 +1,360 @@
+-- Closed WDF/Virtio personality for the pinned unchanged Windows RNG source.
+-- SPDX-License-Identifier: MIT
+## pragmas.nogc=true
+## pragmas.noentrypoint=true
+## pragmas.nochecks=true
+## pragmas.nocstaticassert=true
+## pragmas.unitname='drift_windows_viorng'
+local T=require 'runtime_types'
+require 'objects'
+local function storage(s:*T.State) <cimport 'drift_rng_storage_init',cinclude '"profile.h"'> end
+local function host_valid(h:*T.Host):int32 <cimport 'drift_rng_host_valid',cinclude '"profile.h"'> end
+local function hw_valid(s:*T.State):int32 <cimport 'drift_rng_hw_valid',cinclude '"profile.h"'> end
+local function dma(s:*T.State):*T.DMA <cimport 'drift_rng_dma',cinclude '"profile.h"'> end
+local function pending(s:*T.State):*[0]*T.Request <cimport 'drift_rng_pending',cinclude '"profile.h"'> end
+local function notifications(s:*T.State):*[0]*T.Request <cimport 'drift_rng_notifications',cinclude '"profile.h"'> end
+local function notify(s:*T.State,r:*T.Request) <cimport 'drift_rng_notify',cinclude '"profile.h"'> end
+local function entry(s:*T.State,i:uint32):pointer <cimport 'drift_rng_entry',cinclude '"profile.h"'> end
+local function entry_index(s:*T.State,p:pointer):int32 <cimport 'drift_rng_entry_index',cinclude '"profile.h"'> end
+local function entry_clear(s:*T.State,i:uint32) <cimport 'drift_rng_entry_clear',cinclude '"profile.h"'> end
+local function entry_size():csize <cimport 'drift_rng_entry_size',cinclude '"profile.h"'> end
+local function tag_valid(t:uint32):int32 <cimport 'drift_rng_tag_valid',cinclude '"profile.h"'> end
+local function native_open(s:*T.State):int32 <cimport 'drift_rng_native_open',cinclude '"profile.h"'> end
+local function native_ready(s:*T.State):int32 <cimport 'drift_rng_native_ready',cinclude '"profile.h"'> end
+local function native_close(s:*T.State):int32 <cimport 'drift_rng_native_close',cinclude '"profile.h"'> end
+local function native_state(s:*T.State):uint32 <cimport 'drift_rng_native_state',cinclude '"profile.h"'> end
+local function dma_active(s:*T.State):uint32 <cimport 'drift_rng_dma_active',cinclude '"profile.h"'> end
+local function dma_cookie(s:*T.State):pointer <cimport 'drift_rng_dma_cookie',cinclude '"profile.h"'> end
+local function native_add(s:*T.State,n:uint32,c:pointer):int32 <cimport 'drift_rng_native_add',cinclude '"profile.h"'> end
+local function native_kick(s:*T.State):int32 <cimport 'drift_rng_native_kick',cinclude '"profile.h"'> end
+local function native_get(s:*T.State,c:*pointer,n:*uint32):int32 <cimport 'drift_rng_native_get',cinclude '"profile.h"'> end
+local function alloc_dma(s:*T.State):int32 <cimport 'drift_rng_alloc_dma',cinclude '"profile.h"'> end
+local function free_dma(s:*T.State) <cimport 'drift_rng_free_dma',cinclude '"profile.h"'> end
+local function bind_vdevice(v:*T.VDriver,s:*T.State) <cimport 'drift_rng_bind_vdevice',cinclude '"profile.h"'> end
+local function vq(s:*T.State):*T.Queue <cimport 'drift_rng_vq',cinclude '"profile.h"'> end
+local function init_vq(s:*T.State,out:*[0]*T.Queue) <cimport 'drift_rng_init_vq',cinclude '"profile.h"'> end
+local function queue_param(s:*T.State,p:pointer):int32 <cimport 'drift_rng_queue_param',cinclude '"profile.h"'> end
+local function irq_info_valid(p:pointer):int32 <cimport 'drift_rng_irq_info_valid',cinclude '"profile.h"'> end
+local function irq_info(p:pointer) <cimport 'drift_rng_irq_info',cinclude '"profile.h"'> end
+local function output(r:*T.Request,p:pointer,n:*csize) <cimport 'drift_rng_output',cinclude '"profile.h"'> end
+local function set_cancel(r:*T.Request,f:T.Cancel) <cimport 'drift_rng_set_cancel',cinclude '"profile.h"'> end
+local function call_cancel(r:*T.Request) <cimport 'drift_rng_call_cancel',cinclude '"profile.h"'> end
+local function call_entry(s:*T.State):int32 <cimport 'drift_rng_call_entry',cinclude '"profile.h"'> end
+local function call_add(s:*T.State):int32 <cimport 'drift_rng_call_add',cinclude '"profile.h"'> end
+local function call_prepare(s:*T.State):int32 <cimport 'drift_rng_call_prepare',cinclude '"profile.h"'> end
+local function call_power(s:*T.State,on:int32):int32 <cimport 'drift_rng_call_power',cinclude '"profile.h"'> end
+local function call_release(s:*T.State):int32 <cimport 'drift_rng_call_release',cinclude '"profile.h"'> end
+local function call_irq(s:*T.State,on:int32):int32 <cimport 'drift_rng_call_irq',cinclude '"profile.h"'> end
+local function call_isr(s:*T.State):int32 <cimport 'drift_rng_call_isr',cinclude '"profile.h"'> end
+local function call_dpc(s:*T.State) <cimport 'drift_rng_call_dpc',cinclude '"profile.h"'> end
+local function call_read(s:*T.State,r:*T.Request) <cimport 'drift_rng_call_read',cinclude '"profile.h"'> end
+local function call_stop(s:*T.State,r:*T.Request) <cimport 'drift_rng_call_stop',cinclude '"profile.h"'> end
+local function cleanup_device(s:*T.State) <cimport 'drift_rng_cleanup_device',cinclude '"profile.h"'> end
+local function cleanup_driver(s:*T.State) <cimport 'drift_rng_cleanup_driver',cinclude '"profile.h"'> end
+local function request_valid(r:*T.Request):boolean
+ return r~=nilptr and r.owner~=nilptr and r.phase==2 and r.owner.active==r and r.owner.phase~=0
+end
+local function finish_request(s:*T.State,r:*T.Request,status:int32,info:usize):int32
+ if r==nilptr or r.owner~=s or (r.phase~=1 and r.phase~=2) or r.completions~=0 then return T.STATE end
+ if status==T.PENDING or info>r.capacity then return T.INVALID end
+ if s.notify_count>=16 then T.fail(s,T.STATE);return T.STATE end
+ if s.error~=0 and status>=0 then status=s.error;info=0 end
+ r.phase=3;r.status=status;r.information=info;r.completions=1;r.cancelable=0
+ if s.active==r then s.active=nilptr end
+ local list=notifications(s);list[s.notify_count]=r;s.notify_count=s.notify_count+1
+ return 0
+end
+local function drift_win_rng_assert_fail() <cexport,codename 'drift_win_rng_assert_fail'>
+ T.fail(T.current(),T.STATE)
+end
+local function WdfSpinLockAcquire(o:*T.Object) <cexport,codename 'WdfSpinLockAcquire'>
+ local s=T.owner(o,5);if s==nilptr then return end
+ if s.locked~=0 then T.fail(s,T.STATE);return end
+ s.locked=1
+end
+local function WdfSpinLockRelease(o:*T.Object) <cexport,codename 'WdfSpinLockRelease'>
+ local s=T.owner(o,5);if s==nilptr then return end
+ if s.locked~=1 then T.fail(s,T.STATE);return end
+ s.locked=0
+end
+local function WdfInterruptGetInfo(o:*T.Object,p:pointer) <cexport,codename 'WdfInterruptGetInfo'>
+ local s=T.owner(o,4);if s==nilptr then return end
+ if irq_info_valid(p)==0 then T.fail(s,T.INVALID);return end
+ irq_info(p)
+end
+local function WdfInterruptQueueDpcForIsr(o:*T.Object):uint8 <cexport,codename 'WdfInterruptQueueDpcForIsr'>
+ local s=T.owner(o,4);if s==nilptr or s.dpc~=0 then return 0 end
+ if s.latch_ready==0 then T.fail(s,T.STATE);return 0 end
+ s.dpc=1;return 1
+end
+local function WdfRequestRetrieveOutputBuffer(r:*T.Request,minimum:csize,result:pointer,length:*csize):int32 <cexport,codename 'WdfRequestRetrieveOutputBuffer'>
+ if not request_valid(r) or result==nilptr then return T.STATE end
+ if r.capacity<minimum then return T.SMALL end
+ if r.output==nilptr then return T.INVALID end
+ output(r,result,length);return 0
+end
+local function WdfRequestMarkCancelableEx(r:*T.Request,f:T.Cancel):int32 <cexport,codename 'WdfRequestMarkCancelableEx'>
+ if not request_valid(r) or r.cancelable~=0 or f==nilptr then return T.STATE end
+ if r.cancel_owned~=0 then return T.CANCELLED end
+ set_cancel(r,f);r.cancelable=1;return 0
+end
+local function WdfRequestUnmarkCancelable(r:*T.Request):int32 <cexport,codename 'WdfRequestUnmarkCancelable'>
+ if not request_valid(r) then return T.STATE end
+ if r.cancel_owned~=0 then return T.CANCELLED end
+ if r.cancelable==0 then return T.STATE end
+ r.cancelable=0;return 0
+end
+local function WdfRequestCompleteWithInformation(r:*T.Request,status:int32,n:usize) <cexport,codename 'WdfRequestCompleteWithInformation'>
+ if not request_valid(r) then T.fail(T.current(),T.STATE);return end
+ local result=finish_request(r.owner,r,status,n)
+ if result~=0 then T.fail(r.owner,result) end
+end
+local function WdfRequestComplete(r:*T.Request,status:int32) <cexport,codename 'WdfRequestComplete'>
+ WdfRequestCompleteWithInformation(r,status,0)
+end
+local function WdfRequestStopAcknowledge(r:*T.Request,requeue:uint8) <cexport,codename 'WdfRequestStopAcknowledge'>
+ -- This profile exposes final removal/purge, not transparent system suspend.
+ if not request_valid(r) then T.fail(T.current(),T.STATE);return end
+ if requeue~=0 then T.fail(r.owner,T.UNSUPPORTED);return end
+ if r.cancel_owned==0 then T.fail(r.owner,T.STATE) end
+end
+local function ExAllocatePoolUninitialized(pool:int32,size:csize,tag:uint32):pointer <cexport,codename 'ExAllocatePoolUninitialized'>
+ local s=T.current()
+ if s==nilptr or pool~=0 or size~=entry_size() or tag_valid(tag)==0 then T.fail(s,T.INVALID);return nilptr end
+ for i:uint32=0,<16 do
+  local bit=uint32(1)<<i
+  if (s.pool_used&bit)==0 then s.pool_used=s.pool_used|bit;entry_clear(s,i);return entry(s,i) end
+ end
+ return nilptr
+end
+local function ExFreePoolWithTag(p:pointer,tag:uint32) <cexport,codename 'ExFreePoolWithTag'>
+ local s=T.current();if s==nilptr then return end
+ local index=entry_index(s,p)
+ if index<0 or tag_valid(tag)==0 then T.fail(s,T.INVALID);return end
+ local bit=uint32(1)<<uint32(index)
+ if (s.pool_used&bit)==0 then T.fail(s,T.STATE);return end
+ if dma_active(s)~=0 and dma_cookie(s)==p then s.pool_quarantined=s.pool_quarantined|bit;T.fail(s,T.STATE);return end
+ s.pool_used=s.pool_used&(~bit)
+end
+local function RtlCopyMemory(dst:pointer,src:pointer,length:csize) <cexport,codename 'RtlCopyMemory'>
+ local s=T.current();if s==nilptr then return end
+ local r=(@*T.Request)(s.active);local m=dma(s)
+ if not request_valid(r) or dst~=r.output or src~=m.data or length>r.capacity or length>4096 or m.data==nilptr or dma_active(s)~=0 then T.fail(s,T.STATE);return end
+ local to=(@*[0]uint8)(dst);local from=(@*[0]uint8)(src)
+ for i:csize=0,<length do to[i]=from[i] end
+end
+local function vdriver(v:*T.VDriver):*T.State
+ if v==nilptr or v.owner==nilptr or v.owner.phase==0 then return nilptr end;return v.owner
+end
+local function VirtIOWdfInitialize(v:*T.VDriver,d:*T.Object,resources:*T.Object,interrupt:*T.Object,tag:uint32):int32 <cexport,codename 'VirtIOWdfInitialize'>
+ local s=T.owner(d,2)
+ if s==nilptr or resources~=T.object(s,6) or interrupt~=nilptr or tag_valid(tag)==0 then return T.INVALID end
+ bind_vdevice(v,s)
+ local n=native_open(s)
+ if n<0 then local e=T.native_error(n);T.fail(s,e);return e end
+ return 0
+end
+local function VirtIOWdfInitQueues(v:*T.VDriver,n:uint32,out:*[0]*T.Queue,param:pointer):int32 <cexport,codename 'VirtIOWdfInitQueues'>
+ local s=vdriver(v)
+ if s==nilptr or n~=1 or out==nilptr or queue_param(s,param)==0 or native_state(s)~=4 then return T.INVALID end
+ init_vq(s,out);return 0
+end
+local function VirtIOWdfSetDriverOK(v:*T.VDriver) <cexport,codename 'VirtIOWdfSetDriverOK'>
+ local s=vdriver(v);if s==nilptr then return end
+ local n=native_ready(s);if n<0 then T.fail(s,T.native_error(n)) end
+end
+local function VirtIOWdfSetDriverFailed(v:*T.VDriver) <cexport,codename 'VirtIOWdfSetDriverFailed'>
+ T.fail(vdriver(v),T.IOERROR)
+end
+local function VirtIOWdfDestroyQueues(v:*T.VDriver):int32 <cexport,codename 'VirtIOWdfDestroyQueues'>
+ local s=vdriver(v);if s==nilptr then return T.INVALID end
+ local n=native_close(s);if n<0 then local e=T.native_error(n);T.fail(s,e);return e end
+ s.latch_ready=0;s.latch_cookie=nilptr;s.latch_length=0;s.irq_latch=0;s.dpc=0;return 0
+end
+local function VirtIOWdfShutdown(v:*T.VDriver):int32 <cexport,codename 'VirtIOWdfShutdown'>
+ return VirtIOWdfDestroyQueues(v)
+end
+local function VirtIOWdfDeviceAllocDmaMemory(v:*T.VDevice,n:csize,tag:uint32):pointer <cexport,codename 'VirtIOWdfDeviceAllocDmaMemory'>
+ if v==nilptr or v.owner==nilptr then return nilptr end
+ local s=v.owner;local m=dma(s)
+ if n~=4096 or tag~=0 or m.data~=nilptr then T.fail(s,T.INVALID);return nilptr end
+ if alloc_dma(s)~=0 then s.last_error=T.OOM;return nilptr end
+ if m.data==nilptr or m.size<4096 or m.address==0 or (m.address&4095)~=0 then
+  if m.data~=nilptr then free_dma(s) end
+  T.fail(s,T.IOERROR);return nilptr
+ end
+ return m.data
+end
+local function VirtIOWdfDeviceGetPhysicalAddress(v:*T.VDevice,p:pointer):T.Physical <cexport,codename 'VirtIOWdfDeviceGetPhysicalAddress'>
+ local result:T.Physical=(@T.Physical){}
+ if v==nilptr or v.owner==nilptr then return result end
+ local s=v.owner;local m=dma(s)
+ if p~=m.data or p==nilptr then T.fail(s,T.INVALID);return result end
+ result.QuadPart=int64(m.address);return result
+end
+local function VirtIOWdfDeviceFreeDmaMemory(v:*T.VDevice,p:pointer) <cexport,codename 'VirtIOWdfDeviceFreeDmaMemory'>
+ if v==nilptr or v.owner==nilptr then return end
+ local s=v.owner;local m=dma(s)
+ if p~=m.data or p==nilptr then T.fail(s,T.INVALID);return end
+ if native_state(s)~=0 or dma_active(s)~=0 then T.fail(s,T.STATE);return end
+ free_dma(s)
+end
+local function queue_owner(q:*T.Queue):*T.State
+ if q==nilptr or q.owner==nilptr or q.index~=0 or q~=vq(q.owner) then return nilptr end;return q.owner
+end
+local function virtqueue_add_buf(q:*T.Queue,sg:*T.SG,out:uint32,inside:uint32,cookie:pointer,indirect:pointer,address:uint64):cint <cexport,codename 'virtqueue_add_buf'>
+ local s=queue_owner(q);if s==nilptr then return -1 end
+ local index=entry_index(s,cookie)
+ if sg==nilptr or out~=0 or inside~=1 or indirect~=nilptr or address~=0 or index<0 or (s.pool_used&(uint32(1)<<uint32(index)))==0 then T.fail(s,T.INVALID);return -1 end
+ local m=dma(s)
+ if uint64(sg.physAddr.QuadPart)~=m.address or sg.length==0 or sg.length>4096 or s.locked~=1 then T.fail(s,T.INVALID);return -1 end
+ local n=native_add(s,sg.length,cookie)
+ if n<0 then T.fail(s,T.native_error(n));return -1 end
+ return 0
+end
+local function virtqueue_kick(q:*T.Queue) <cexport,codename 'virtqueue_kick'>
+ local s=queue_owner(q);if s==nilptr then return end
+ -- Virtio's kick preparation has no work when no descriptor was added.
+ -- The original IRQ-enable callback legitimately kicks an empty queue.
+ if dma_active(s)==0 then return end
+ local n=native_kick(s);if n<0 then T.fail(s,T.native_error(n)) end
+end
+local function virtqueue_get_buf(q:*T.Queue,length:*[0]uint32):pointer <cexport,codename 'virtqueue_get_buf'>
+ local s=queue_owner(q);if s==nilptr or length==nilptr then return nilptr end
+ if s.locked~=1 then T.fail(s,T.STATE);return nilptr end
+ if s.latch_ready==0 then return nilptr end
+ local p=s.latch_cookie;length[0]=s.latch_length
+ s.latch_ready=0;s.latch_cookie=nilptr;s.latch_length=0;return p
+end
+local function virtqueue_enable_cb(q:*T.Queue):boolean <cexport,codename 'virtqueue_enable_cb'>
+ local s=queue_owner(q);if s==nilptr then return false end
+ s.callbacks=1;return s.latch_ready==0
+end
+local function virtqueue_disable_cb(q:*T.Queue) <cexport,codename 'virtqueue_disable_cb'>
+ local s=queue_owner(q);if s~=nilptr then s.callbacks=0 end
+end
+local function VirtIOWdfGetISRStatus(v:*T.VDriver):uint8 <cexport,codename 'VirtIOWdfGetISRStatus'>
+ local s=vdriver(v);if s==nilptr then return 0 end
+ local n=s.irq_latch;s.irq_latch=0;return uint8(n)
+end
+local function dispatch(s:*T.State)
+ for iteration:uint32=0,<16 do
+  if s.phase~=2 or s.error~=0 or s.locked~=0 or s.dispatching~=0 or s.active~=nilptr or dma_active(s)~=0 or s.latch_ready~=0 or s.pending_count==0 then return end
+  local list=pending(s);local r=list[0]
+  for i:uint32=1,<s.pending_count do list[i-1]=list[i] end
+  s.pending_count=s.pending_count-1;list[s.pending_count]=nilptr
+  r.phase=2;s.active=r;s.dispatching=1;call_read(s,r);s.dispatching=0
+ end
+end
+local function drift_rng_open(s:*T.State):int32 <cexport,codename 'drift_rng_open'>
+ if s==nilptr or s.phase~=0 or s.depth~=1 or host_valid(s.host)==0 or hw_valid(s)==0 then return T.INVALID end
+ if native_state(s)~=0 or dma(s).data~=nilptr then return T.BUSY end
+ storage(s);s.phase=1;s.error=0;s.last_error=0;s.configured=0;s.prepared=0;s.powered=0;s.locked=0
+ s.callbacks=0;s.dpc=0;s.irq_latch=0;s.latch_ready=0;s.latch_cookie=nilptr;s.latch_length=0
+ s.pool_used=0;s.pool_quarantined=0;s.pending_count=0;s.notify_count=0;s.dispatching=0;s.active=nilptr
+ local status=call_entry(s)
+ if status>=0 then status=call_add(s) end
+ if status>=0 and s.configured~=255 then status=T.STATE end
+ if status>=0 then s.prepared=1;status=call_prepare(s) end
+ if status>=0 then s.powered=1;status=call_power(s,1) end
+ if status>=0 and s.error==0 then status=call_irq(s,1) end
+ if s.error~=0 then status=s.error end
+ if status<0 then s.last_error=status;return status end
+ s.phase=2;return 0
+end
+local function drift_rng_submit(s:*T.State,r:*T.Request,p:*[0]uint8,capacity:csize,length:csize):int32 <cexport,codename 'drift_rng_submit'>
+ if s==nilptr or r==nilptr or s.phase~=2 then return T.STATE end
+ if s.error~=0 then return s.error end
+ if r.phase~=0 or r.owner~=nilptr or r.notifying~=0 then return T.BUSY end
+ if length>1048576 or capacity>1048576 then return T.INVALID end
+ local active:uint32=0;if s.active~=nilptr then active=1 end
+ if s.pending_count+s.notify_count+active>=16 then return T.BUSY end
+ r.owner=s;r.output=p;r.capacity=capacity;r.length=length;r.phase=1;r.cancelable=0;r.cancel_owned=0;r.notifying=0;r.completions=0;r.status=T.PENDING;r.information=0
+ if length==0 then finish_request(s,r,0,0) else
+  local list=pending(s);list[s.pending_count]=r;s.pending_count=s.pending_count+1;dispatch(s)
+ end
+ if r.phase==3 then return r.status end;return T.PENDING
+end
+local function drift_rng_pump(s:*T.State):int32 <cexport,codename 'drift_rng_pump'>
+ if s==nilptr or s.phase~=2 or s.locked~=0 then return T.STATE end
+ if s.error~=0 then return s.error end
+ dispatch(s)
+ if s.error~=0 then return s.error end
+ if dma_active(s)~=0 and s.latch_ready==0 then
+  local cookie:pointer=nilptr;local n:uint32=0
+  local result=native_get(s,&cookie,&n)
+  if result<0 then local e=T.native_error(result);T.fail(s,e);return e end
+  if result==1 then
+   if entry_index(s,cookie)<0 or n>4096 then T.fail(s,T.IOERROR);return s.error end
+   s.latch_cookie=cookie;s.latch_length=n;s.latch_ready=1
+  end
+ end
+ if s.latch_ready~=0 and s.callbacks~=0 then s.irq_latch=1;call_isr(s) end
+ if s.dpc~=0 then s.dpc=0;call_dpc(s) end
+ if s.locked~=0 then T.fail(s,T.STATE) end
+ dispatch(s)
+ return s.error
+end
+local function drift_rng_cancel(s:*T.State,r:*T.Request):int32 <cexport,codename 'drift_rng_cancel'>
+ if s==nilptr or r==nilptr or s.phase~=2 or r.owner~=s then return T.STATE end
+ if r.phase==1 then
+  local list=pending(s);local found:boolean=false
+  for i:uint32=0,<s.pending_count do
+   if list[i]==r then
+    for j:uint32=i+1,<s.pending_count do list[j-1]=list[j] end
+    s.pending_count=s.pending_count-1;list[s.pending_count]=nilptr;found=true;break
+   end
+  end
+  if not found then return T.STATE end
+  return finish_request(s,r,T.CANCELLED,0)
+ end
+ if not request_valid(r) or r.cancelable==0 then return T.STATE end
+ r.cancel_owned=1;call_cancel(r)
+ if r.phase~=3 then T.fail(s,T.STATE);return T.STATE end
+ return s.error
+end
+local function drift_rng_drain(s:*T.State):int32 <cexport,codename 'drift_rng_drain'>
+ if s==nilptr or s.locked~=0 then return T.STATE end
+ local count:int32=0;local list=notifications(s)
+ for iteration:uint32=0,<16 do
+  if s.notify_count==0 then break end
+  local r=list[0]
+  for i:uint32=1,<s.notify_count do list[i-1]=list[i] end
+  s.notify_count=s.notify_count-1;list[s.notify_count]=nilptr;r.notifying=1
+  notify(s,r);r.notifying=0;count=count+1
+ end
+ return count
+end
+local function drift_windows_viorng_request_reset(r:*T.Request):int32 <cexport,codename 'drift_windows_viorng_request_reset'>
+ if r==nilptr then return T.INVALID end
+ if r.phase~=3 or r.notifying~=0 then return T.BUSY end
+ r.owner=nilptr;r.output=nilptr;r.capacity=0;r.length=0;r.phase=0;r.cancelable=0;r.cancel_owned=0;r.completions=0;r.status=0;r.information=0;return 0
+end
+local function drift_rng_close(s:*T.State):int32 <cexport,codename 'drift_rng_close'>
+ if s==nilptr then return T.INVALID end
+ if s.depth~=1 or s.locked~=0 then return T.BUSY end
+ if s.phase==0 then return 0 end
+ s.phase=3;s.error=0
+ local list=pending(s)
+ while s.pending_count>0 do
+  local r=list[s.pending_count-1];s.pending_count=s.pending_count-1;list[s.pending_count]=nilptr
+  finish_request(s,r,T.CANCELLED,0)
+ end
+ local active=(@*T.Request)(s.active)
+ if active~=nilptr then call_stop(s,active) end
+ if s.callbacks~=0 then call_irq(s,0) end
+ if s.powered~=0 then call_power(s,0) else
+  local n=native_close(s);if n<0 then T.fail(s,T.native_error(n)) end
+ end
+ if native_state(s)~=0 or dma_active(s)~=0 then
+  if s.error==0 then T.fail(s,T.STATE) end;s.phase=4;return s.error
+ end
+ s.powered=0
+ if s.prepared~=0 then call_release(s);s.prepared=0 end
+ if (s.configured&2)~=0 then cleanup_device(s) end
+ if (s.configured&1)~=0 then cleanup_driver(s) end
+ if dma(s).data~=nilptr then free_dma(s) end
+ s.pool_used=0;s.pool_quarantined=0;s.latch_ready=0;s.latch_cookie=nilptr;s.dpc=0;s.irq_latch=0;s.active=nilptr;s.callbacks=0
+ if s.error~=0 then s.phase=4;return s.error end
+ s.phase=0;return 0
+end

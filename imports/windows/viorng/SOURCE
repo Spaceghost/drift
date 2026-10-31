@@ -1,0 +1,4 @@
+repository=https://github.com/virtio-win/kvm-guest-drivers-windows
+commit=bd196cda83a50a5b2545dd4f85d25cc6238e10ae
+path=viorng/viorng
+license=preserve per-file BSD-3-Clause notices and directory BSD-2-style LICENSE

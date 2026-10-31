@@ -1,0 +1,74 @@
+-- Closed WDF object and registration semantics. SPDX-License-Identifier: MIT
+local T=require 'runtime_types'
+local function driver_meta(s:*T.State,c:pointer,a:pointer):int32 <cimport 'drift_rng_driver_meta',cinclude '"profile.h"'> end
+local function power_meta(s:*T.State,c:pointer):int32 <cimport 'drift_rng_power_meta',cinclude '"profile.h"'> end
+local function io_type(s:*T.State,t:uint32) <cimport 'drift_rng_set_iotype',cinclude '"profile.h"'> end
+local function device_meta(s:*T.State,a:pointer):int32 <cimport 'drift_rng_device_meta',cinclude '"profile.h"'> end
+local function device_result(s:*T.State,i:*[0]*T.Object,d:*[0]*T.Object) <cimport 'drift_rng_device_result',cinclude '"profile.h"'> end
+local function irq_meta(s:*T.State,c:pointer):int32 <cimport 'drift_rng_interrupt_meta',cinclude '"profile.h"'> end
+local function lock_meta(s:*T.State,a:pointer):int32 <cimport 'drift_rng_lock_meta',cinclude '"profile.h"'> end
+local function iface_meta(s:*T.State,g:pointer):int32 <cimport 'drift_rng_interface_meta',cinclude '"profile.h"'> end
+local function queue_meta(s:*T.State,c:pointer):int32 <cimport 'drift_rng_queue_meta',cinclude '"profile.h"'> end
+local function context(s:*T.State):pointer <cimport 'drift_rng_context',cinclude '"profile.h"'> end
+local function WdfDriverCreate(o:*T.Object,registry:pointer,attrs:pointer,c:pointer,result:*[0]*T.Object):int32 <cexport,codename 'WdfDriverCreate'>
+ local s=T.owner(o,7)
+ if s==nilptr or s.phase~=1 or s.configured~=0 or driver_meta(s,c,attrs)==0 then return T.INVALID end
+ s.configured=1;if result~=nilptr then result[0]=T.object(s,1) end;return 0
+end
+local function WdfDeviceInitSetPnpPowerEventCallbacks(o:*T.Object,c:pointer) <cexport,codename 'WdfDeviceInitSetPnpPowerEventCallbacks'>
+ local s=T.owner(o,6);if s==nilptr then return end
+ if s.configured~=1 or power_meta(s,c)==0 then T.fail(s,T.INVALID);return end
+ s.configured=5
+end
+local function WdfDeviceInitSetIoType(o:*T.Object,t:uint32) <cexport,codename 'WdfDeviceInitSetIoType'>
+ local s=T.owner(o,6);if s==nilptr then return end
+ if s.configured~=5 or t~=3 then T.fail(s,T.INVALID);return end
+ io_type(s,t)
+end
+local function WdfDeviceCreate(i:*[0]*T.Object,a:pointer,out:*[0]*T.Object):int32 <cexport,codename 'WdfDeviceCreate'>
+ if i==nilptr or out==nilptr then return T.INVALID end
+ local s=T.owner(i[0],6)
+ if s==nilptr or s.configured~=5 or device_meta(s,a)==0 then return T.INVALID end
+ device_result(s,i,out);s.configured=7;return 0
+end
+local function WdfInterruptCreate(d:*T.Object,c:pointer,a:pointer,out:*[0]*T.Object):int32 <cexport,codename 'WdfInterruptCreate'>
+ local s=T.owner(d,2)
+ if s==nilptr or s.configured~=7 or a~=nilptr or out==nilptr or irq_meta(s,c)==0 then return T.INVALID end
+ s.configured=15;out[0]=T.object(s,4);return 0
+end
+local function WdfSpinLockCreate(a:pointer,out:*[0]*T.Object):int32 <cexport,codename 'WdfSpinLockCreate'>
+ local s=T.current()
+ if s==nilptr or s.configured~=15 or out==nilptr or lock_meta(s,a)==0 then return T.INVALID end
+ s.configured=31;out[0]=T.object(s,5);return 0
+end
+local function WdfDeviceCreateDeviceInterface(d:*T.Object,g:pointer,r:pointer):int32 <cexport,codename 'WdfDeviceCreateDeviceInterface'>
+ local s=T.owner(d,2)
+ if s==nilptr or s.configured~=31 or r~=nilptr or iface_meta(s,g)==0 then return T.INVALID end
+ s.configured=63;return 0
+end
+local function WdfIoQueueCreate(d:*T.Object,c:pointer,a:pointer,out:*[0]*T.Object):int32 <cexport,codename 'WdfIoQueueCreate'>
+ local s=T.owner(d,2)
+ if s==nilptr or s.configured~=63 or a~=nilptr or out==nilptr or queue_meta(s,c)==0 then return T.INVALID end
+ s.configured=127;out[0]=T.object(s,3);return 0
+end
+local function WdfDeviceConfigureRequestDispatching(d:*T.Object,q:*T.Object,t:uint32):int32 <cexport,codename 'WdfDeviceConfigureRequestDispatching'>
+ local s=T.owner(d,2)
+ if s==nilptr or s.configured~=127 or q~=T.object(s,3) or t~=3 then return T.INVALID end
+ s.configured=255;return 0
+end
+local function WdfDriverWdmGetDriverObject(d:*T.Object):*T.Object <cexport,codename 'WdfDriverWdmGetDriverObject'>
+ local s=T.owner(d,1);if s==nilptr then return nilptr end;return T.object(s,7)
+end
+local function WdfIoQueueGetDevice(q:*T.Object):*T.Object <cexport,codename 'WdfIoQueueGetDevice'>
+ local s=T.owner(q,3);if s==nilptr then return nilptr end;return T.object(s,2)
+end
+local function WdfInterruptGetDevice(q:*T.Object):*T.Object <cexport,codename 'WdfInterruptGetDevice'>
+ local s=T.owner(q,4);if s==nilptr then return nilptr end;return T.object(s,2)
+end
+local function WdfRequestGetIoQueue(r:*T.Request):*T.Object <cexport,codename 'WdfRequestGetIoQueue'>
+ if r==nilptr or r.owner==nilptr or r.phase~=2 or r.owner.active~=r then return nilptr end
+ return T.object(r.owner,3)
+end
+local function drift_win_rng_get_context(o:*T.Object):pointer <cexport,codename 'drift_win_rng_get_context'>
+ local s=T.owner(o,2);if s==nilptr or (s.configured&2)==0 then return nilptr end;return context(s)
+end

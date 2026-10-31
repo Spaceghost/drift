@@ -1,0 +1,11 @@
+build { core init lib/ld test/rng_probe }
+create_boot_directory
+install_config {
+<config>
+ <parent-provides><service name="LOG"/><service name="PD"/><service name="CPU"/><service name="ROM"/><service name="IO_PORT"/></parent-provides>
+ <default-route><any-service><parent/></any-service></default-route>
+ <default caps="100"/>
+ <start name="rng-probe"><resource name="RAM" quantum="4M"/></start>
+</config>
+}
+build_boot_image [build_artifacts]

@@ -1,0 +1,245 @@
+-- Closed, bounded Linux Virtio framework personality. SPDX-License-Identifier: MIT
+## pragmas.nogc = true
+## pragmas.noentrypoint = true
+## pragmas.nochecks = true
+## pragmas.nocstaticassert = true
+## pragmas.unitname = 'drift_linux_virtio_rng'
+local hw=require 'drift.hw'
+local Device:type <cimport 'drift_virtio',cinclude '"virtio_rng_compat.h"',forwarddecl> = @record{}
+local Transfer:type <cimport 'drift_virtio_raw_transfer',cinclude '"virtio_rng_compat.h"'> = @record{
+  mapping:hw.DMA,cookie:pointer,owner:pointer,started_us:uint64,
+  queue:uint32,offset:uint32,length:uint32,direction:uint32,active:uint32
+}
+local State:type <cimport 'drift_linux_virtio_rng',cinclude '"virtio_rng_compat.h"'> = @record{
+  transport:*Device,payload:hw.DMA,transfer:Transfer,hwrng:pointer,ida:pointer,source_buffer:pointer,completed_cookie:pointer,
+  read_output:*[0]uint8,read_started:uint64,
+  phase:uint32,allocated:uint32,queue_created:uint32,registered:uint32,id_owned:uint32,index:uint32,
+  free_requested:uint32,id_free_requested:uint32,completion_latched:uint32,completed_length:uint32,
+  read_length:uint32,read_active:uint32,cancel_requested:uint32,error:int32,
+  source_slot:[256]uint64,device_slot:[16]uint64,queue_slot:[16]uint64
+}
+local VDev:type <cimport 'drift_vrng_device',cinclude '"virtio_rng_compat.h"',forwarddecl> = @record{}
+local VQ:type <cimport 'drift_vrng_vq',cinclude '"virtio_rng_compat.h"',forwarddecl> = @record{}
+local Rng:type <cimport 'drift_vrng_hwrng',cinclude '"virtio_rng_compat.h"',forwarddecl> = @record{}
+local SG:type <cimport 'drift_vrng_sg',cinclude '"virtio_rng_compat.h"',forwarddecl> = @record{}
+local IDA:type <cimport 'drift_vrng_ida',cinclude '"virtio_rng_compat.h"'> = @record{bitmap:uint32}
+local Completion:type <cimport 'drift_vrng_completion',cinclude '"virtio_rng_compat.h"'> = @record{done:uint32}
+local function current():*State <cimport 'drift_lx_vrng_current',cinclude '"virtio_rng_compat.h"'> end
+local function bus(s:*State):*hw.Bus <cimport 'drift_vrng_hw',cinclude '"virtio_rng_compat.h"'> end
+local function valid(d:*Device):int32 <cimport 'drift_vrng_transport_valid',cinclude '"virtio_rng_compat.h"'> end
+local function closed(s:*State):int32 <cimport 'drift_vrng_transport_closed',cinclude '"virtio_rng_compat.h"'> end
+local function transport_failed(s:*State):int32 <cimport 'drift_vrng_transport_failed',cinclude '"virtio_rng_compat.h"'> end
+local function vdev(s:*State):*VDev <cimport 'drift_vrng_device_slot',cinclude '"virtio_rng_compat.h"'> end
+local function vq(s:*State):*VQ <cimport 'drift_vrng_queue_slot',cinclude '"virtio_rng_compat.h"'> end
+local function slot(s:*State):*[0]uint8 <cimport 'drift_vrng_source_slot',cinclude '"virtio_rng_compat.h"'> end
+local function devbytes(s:*State):*[0]uint8 <cimport 'drift_vrng_device_bytes',cinclude '"virtio_rng_compat.h"'> end
+local function qbytes(s:*State):*[0]uint8 <cimport 'drift_vrng_queue_bytes',cinclude '"virtio_rng_compat.h"'> end
+local function data(s:*State):*[0]uint8 <cimport 'drift_lx_vrng_source_data',cinclude '"virtio_rng_compat.h"'> end
+local function capacity(s:*State):uint32 <cimport 'drift_lx_vrng_source_capacity',cinclude '"virtio_rng_compat.h"'> end
+local function completion(s:*State):*Completion <cimport 'drift_lx_vrng_source_completion',cinclude '"virtio_rng_compat.h"'> end
+local function rng(s:*State):*Rng <cimport 'drift_lx_vrng_source_hwrng',cinclude '"virtio_rng_compat.h"'> end
+local function source_size():uint32 <cimport 'drift_lx_vrng_source_size',cinclude '"virtio_rng_compat.h"'> end
+local function callback(s:*State) <cimport 'drift_lx_vrng_callback',cinclude '"virtio_rng_compat.h"'> end
+local function sginfo(sg:*SG,p:*pointer,n:*uint32) <cimport 'drift_vrng_sg_data',cinclude '"virtio_rng_compat.h"'> end
+local function cancelled(s:*State):int32 <cimport 'drift_vrng_cancel_take',cinclude '"virtio_rng_compat.h"'> end
+local function cancel_clear(s:*State) <cimport 'drift_vrng_cancel_clear',cinclude '"virtio_rng_compat.h"'> end
+local function timeout(s:*State):uint32 <cimport 'drift_vrng_timeout',cinclude '"virtio_rng_compat.h"'> end
+local function raw_ready(d:*Device):int32 <cimport 'drift_virtio_raw_device_ready',cinclude '"virtio_rng_compat.h"'> end
+local function raw_add(d:*Device,q:uint32,t:*Transfer,m:*hw.DMA,o:uint32,n:uint32,dir:uint32,c:pointer):int32 <cimport 'drift_virtio_raw_add',cinclude '"virtio_rng_compat.h"'> end
+local function raw_kick(d:*Device,q:uint32):int32 <cimport 'drift_virtio_raw_kick',cinclude '"virtio_rng_compat.h"'> end
+local function raw_get(d:*Device,q:uint32,t:*Transfer,c:*pointer,n:*uint32):int32 <cimport 'drift_virtio_raw_get',cinclude '"virtio_rng_compat.h"'> end
+local function close(d:*Device):int32 <cimport 'drift_virtio_close',cinclude '"virtio_rng_compat.h"'> end
+local function fail(s:*State,e:int32)
+  if s~=nilptr and s.error==0 then s.error=e<0 and e or -5 end
+end
+local function native_error(e:int32):int32
+  if e==-2 then return -110 elseif e==-6 then return -12 else return -5 end
+end
+local function clear(p:*[0]uint8,n:uint32)
+  for i:uint32=0,<n do p[i]=0 end
+end
+local function drift_lx_vrng_prepare(s:*State,d:*Device):int32 <cexport,codename 'drift_lx_vrng_prepare'>
+  if s==nilptr or valid(d)==0 then return -22 end
+  if (s.phase~=0 and s.phase~=4) or s.allocated~=0 or s.payload.data~=nilptr or s.transfer.active~=0 then return -16 end
+  s.transport=d;s.phase=1;s.error=0;s.queue_created=0;s.registered=0;s.id_owned=0
+  s.free_requested=0;s.id_free_requested=0;s.completion_latched=0;s.read_active=0;s.hwrng=nilptr;s.ida=nilptr
+  s.source_buffer=nilptr;s.completed_cookie=nilptr;s.completed_length=0;s.read_output=nilptr;s.read_length=0
+  clear(slot(s),2048);clear(devbytes(s),128);clear(qbytes(s),128);cancel_clear(s)
+  return 0
+end
+local function drift_lx_vrng_alloc(n:csize,flags:cint):pointer <cexport,codename 'drift_lx_vrng_alloc'>
+  local s=current()
+  if s==nilptr or flags~=0 or n~=source_size() or n>2048 or s.allocated~=0 then return nilptr end
+  clear(slot(s),2048);s.allocated=1;s.free_requested=0
+  return (@pointer)(slot(s))
+end
+local function drift_lx_vrng_free(p:pointer) <cexport,codename 'drift_lx_vrng_free'>
+  local s=current()
+  if s==nilptr then return end
+  if s.allocated==0 or p~=(@pointer)(slot(s)) or s.free_requested~=0 then fail(s,-22);return end
+  -- Source kfree is logical until native reset proves all DMA is quiescent.
+  s.free_requested=1
+end
+local function drift_lx_vrng_ida_alloc(a:*IDA,flags:cint):cint <cexport,codename 'drift_lx_vrng_ida_alloc'>
+  local s=current()
+  if s==nilptr or a==nilptr or flags~=0 or s.id_owned~=0 then return -22 end
+  for i:uint32=0,<16 do
+    if (a.bitmap&(1_u32<<i))==0 then
+      a.bitmap=a.bitmap|(1_u32<<i);s.ida=(@pointer)(a);s.index=i;s.id_owned=1;s.id_free_requested=0
+      return cint(i)
+    end
+  end
+  return -28
+end
+local function drift_lx_vrng_ida_free(a:*IDA,index:cint) <cexport,codename 'drift_lx_vrng_ida_free'>
+  local s=current()
+  if s==nilptr then return end
+  if a==nilptr or s.id_owned==0 or s.ida~=(@pointer)(a) or index<0 or uint32(index)~=s.index or s.id_free_requested~=0 then fail(s,-22);return end
+  s.id_free_requested=1
+end
+local function drift_lx_vrng_name(out:cstring,format:cstring,index:cint):cint <cexport,codename 'drift_lx_vrng_name'>
+  local s=current();local expected:cstring='virtio_rng.%d';local prefix:cstring='virtio_rng.'
+  if s==nilptr or out==nilptr or format==nilptr or index<0 or index>15 then fail(s,-22);return -22 end
+  local o=(@*[0]cchar)(out);local f=(@*[0]cchar)(format);local e=(@*[0]cchar)(expected);local p=(@*[0]cchar)(prefix)
+  for i:uint32=0,13 do if f[i]~=e[i] then fail(s,-22);return -22 end end
+  for i:uint32=0,<11 do o[i]=p[i] end
+  if index>=10 then o[11]=cchar(49);o[12]=cchar(48+index-10);o[13]=cchar(0);return 13 end
+  o[11]=cchar(48+index);o[12]=cchar(0);return 12
+end
+local function drift_lx_vrng_memcpy(dst:pointer,src:pointer,n:csize):pointer <cexport,codename 'drift_lx_vrng_memcpy'>
+  local s=current()
+  if s==nilptr or dst==nilptr or src==nilptr or n>4096 then fail(s,-22);return nilptr end
+  local da=(@csize)(dst);local sa=(@csize)(src)
+  local db=(@csize)(s.read_output);local sb=(@csize)(data(s))
+  if s.read_active==0 or da<db or sa<sb or da-db>s.read_length or sa-sb>capacity(s) or
+      n>s.read_length-(da-db) or n>capacity(s)-(sa-sb) then fail(s,-22);return nilptr end
+  local d=(@*[0]uint8)(dst);local p=(@*[0]uint8)(src)
+  for i:csize=0,<n do d[i]=p[i] end
+  return dst
+end
+local function drift_lx_vrng_completion_init(c:*Completion) <cexport,codename 'drift_lx_vrng_completion_init'>
+  local s=current()
+  if s==nilptr or c~=completion(s) then fail(s,-22);return end
+  c.done=0
+end
+local function drift_lx_vrng_complete(c:*Completion) <cexport,codename 'drift_lx_vrng_complete'>
+  local s=current()
+  if s==nilptr or c~=completion(s) or c.done==0xffffffff_u32 then fail(s,-22);return end
+  c.done=c.done+1
+end
+local function drift_lx_vrng_find_vq(d:*VDev,name:cstring):*VQ <cexport,codename 'drift_lx_vrng_find_vq'>
+  local s=current()
+  if s==nilptr or d~=vdev(s) or name==nilptr or s.queue_created~=0 then fail(s,-22);return (@*VQ)(-22) end
+  local text=(@*[0]cchar)(name)
+  if text[0]~=cchar(105) or text[1]~=cchar(110) or text[2]~=cchar(112) or text[3]~=cchar(117) or text[4]~=cchar(116) or text[5]~=cchar(0) then fail(s,-22);return (@*VQ)(-22) end
+  local n=capacity(s)
+  if n==0 or n>4096 or hw.alloc(bus(s),n,4096,&s.payload)~=0 then fail(s,-12);return (@*VQ)(-12) end
+  if s.payload.data==nilptr or s.payload.size<n or s.payload.address>0xffffffffffffffff_u64-n then fail(s,-12);return (@*VQ)(-12) end
+  clear(s.payload.data,n);s.queue_created=1
+  return vq(s)
+end
+local function drift_lx_vrng_ready(d:*VDev) <cexport,codename 'drift_lx_vrng_ready'>
+  local s=current()
+  if s==nilptr or d~=vdev(s) or s.queue_created==0 then fail(s,-22);return end
+  local r=raw_ready(s.transport);if r~=0 then fail(s,native_error(r)) end
+end
+local function drift_lx_vrng_add(q:*VQ,sg:*SG,count:cuint,cookie:pointer,flags:cint):cint <cexport,codename 'drift_lx_vrng_add'>
+  local s=current()
+  if s==nilptr then return -22 end
+  if s.error~=0 then return s.error end
+  if q~=vq(s) or sg==nilptr or count~=1 or flags~=0 or s.queue_created==0 or s.completion_latched~=0 then fail(s,-22);return -22 end
+  local p:pointer=nilptr;local n:uint32=0;sginfo(sg,&p,&n)
+  if p~=(@pointer)(data(s)) or cookie~=p or n~=capacity(s) then fail(s,-22);return -22 end
+  s.source_buffer=p
+  local r=raw_add(s.transport,0,&s.transfer,&s.payload,0,n,2,cookie)
+  if r~=0 then fail(s,native_error(r));return s.error end
+  return 0
+end
+local function drift_lx_vrng_kick(q:*VQ):boolean <cexport,codename 'drift_lx_vrng_kick'>
+  local s=current()
+  if s==nilptr or q~=vq(s) then fail(s,-22);return false end
+  if s.error~=0 then return false end
+  local r=raw_kick(s.transport,0);if r~=0 then fail(s,native_error(r));return false end
+  return true
+end
+local function drift_lx_vrng_get(q:*VQ,length:*cuint):pointer <cexport,codename 'drift_lx_vrng_get'>
+  local s=current()
+  if s==nilptr or q~=vq(s) or length==nilptr then fail(s,-22);return nilptr end
+  if s.completion_latched==0 then return nilptr end
+  $length=s.completed_length;local p=s.completed_cookie
+  s.completion_latched=0;s.completed_cookie=nilptr;s.completed_length=0
+  return p
+end
+local function drift_lx_vrng_pump(s:*State):int32 <cexport,codename 'drift_lx_vrng_pump'>
+  if s~=current() or s.phase==0 or s.queue_created==0 then return -22 end
+  if s.error~=0 then return s.error end
+  if s.completion_latched~=0 then fail(s,-5);return s.error end
+  local p:pointer=nilptr;local n:uint32=0
+  local r=raw_get(s.transport,0,&s.transfer,&p,&n)
+  if r<0 then fail(s,native_error(r));if transport_failed(s)~=0 then s.phase=5 end;return s.error end
+  if r==0 then return 0 end
+  if p~=s.source_buffer or n==0 or n>capacity(s) then
+    fail(s,-5);if close(s.transport)~=0 then s.phase=5 end;return s.error
+  end
+  local out=data(s)
+  for i:uint32=0,<n do out[i]=s.payload.data[i] end
+  s.completed_cookie=p;s.completed_length=n;s.completion_latched=1
+  callback(s)
+  if s.error~=0 then return s.error end
+  if s.completion_latched~=0 then fail(s,-5);return s.error end
+  return 1
+end
+local function drift_lx_vrng_wait(c:*Completion):cint <cexport,codename 'drift_lx_vrng_wait'>
+  local s=current()
+  if s==nilptr or c~=completion(s) or s.read_active==0 then fail(s,-22);return -22 end
+  while c.done==0 do
+    if cancelled(s)~=0 then return -4 end
+    if s.error~=0 then return s.error end
+    if hw.time(bus(s))-s.read_started>=timeout(s) then
+      fail(s,-110);if close(s.transport)~=0 then s.phase=5 end;return s.error
+    end
+    local r=drift_lx_vrng_pump(s);if r<0 then return r end
+    if c.done==0 then hw.wait(bus(s),10) end
+  end
+  c.done=c.done-1
+  return 0
+end
+local function drift_lx_vrng_register(r:*Rng):cint <cexport,codename 'drift_lx_vrng_register'>
+  local s=current()
+  if s==nilptr or r~=rng(s) or s.registered~=0 or s.error~=0 then return -22 end
+  s.hwrng=(@pointer)(r);s.registered=1;return 0
+end
+local function drift_lx_vrng_unregister(r:*Rng) <cexport,codename 'drift_lx_vrng_unregister'>
+  local s=current()
+  if s==nilptr or s.registered==0 or s.hwrng~=(@pointer)(r) then fail(s,-22);return end
+  s.registered=0;s.hwrng=nilptr
+end
+local function drift_lx_vrng_reset(d:*VDev) <cexport,codename 'drift_lx_vrng_reset'>
+  local s=current()
+  if s==nilptr or d~=vdev(s) then fail(s,-22);return end
+  local r=close(s.transport)
+  if r~=0 then fail(s,native_error(r));s.phase=5 end
+end
+local function drift_lx_vrng_del_vqs(d:*VDev) <cexport,codename 'drift_lx_vrng_del_vqs'>
+  local s=current()
+  if s==nilptr or d~=vdev(s) then fail(s,-22);return end
+  if closed(s)~=0 then s.queue_created=0;s.completion_latched=0 end
+end
+local function drift_lx_vrng_reclaim(s:*State) <cexport,codename 'drift_lx_vrng_reclaim'>
+  if s~=current() or closed(s)==0 or s.transfer.active~=0 then fail(s,-16);return end
+  if s.payload.data~=nilptr then hw.release(bus(s),&s.payload);s.payload.data=nilptr end
+  if s.id_owned~=0 then
+    local a=(@*IDA)(s.ida)
+    if a==nilptr or s.index>=16 or (a.bitmap&(1_u32<<s.index))==0 then fail(s,-22);return end
+    a.bitmap=a.bitmap&~(1_u32<<s.index);s.id_owned=0
+  end
+  s.allocated=0;s.free_requested=0;s.id_free_requested=0;s.queue_created=0;s.registered=0
+  s.completion_latched=0;s.hwrng=nilptr;s.ida=nilptr;s.source_buffer=nilptr;s.completed_cookie=nilptr
+end
+local function drift_lx_vrng_quiesce(s:*State):int32 <cexport,codename 'drift_lx_vrng_quiesce'>
+  if s~=current() then return -22 end
+  local r=close(s.transport)
+  if r~=0 then s.phase=5;fail(s,native_error(r));return native_error(r) end
+  drift_lx_vrng_reclaim(s)
+  return s.transfer.active==0 and s.payload.data==nilptr and s.allocated==0 and 0 or -5
+end

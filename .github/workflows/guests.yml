@@ -9,6 +9,10 @@ on:
       - '!ports/**/records/**'
       - '!ports/**/*.md'
       - tests/bench_linux_import.*
+      - native/**
+      - generated/**
+      - include/**
+      - lib/**
       - .github/workflows/guests.yml
 permissions:
   contents: read
@@ -24,6 +28,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: Boot and verify the real guest
         run: python3 ports/${{ matrix.os }}/run.py --work "$PWD/build/qualification-${{ matrix.os }}"
+      - name: MINIX actual Virtio RNG DMA imports
+        if: matrix.os == 'minix'
+        run: |
+          for profile in raw linux windows; do
+            python3 ports/minix/virtio-rng/run.py --work "$PWD/build/qualification-minix-rng-$profile" --profile "$profile" --qemu-root "$PWD/build/qualification-minix/qemu-root" --sdk "$PWD/build/qualification-minix/sdk" --iso "$PWD/build/qualification-minix/minix_R3.3.0-588a35b.iso"
+          done
+      - name: MINIX paired native and imported RNG trials
+        if: matrix.os == 'minix'
+        run: python3 ports/minix/virtio-rng/bench.py --work "$PWD/build/qualification-minix-rng-paired" --events 4096 --rounds 4 --qemu-root "$PWD/build/qualification-minix/qemu-root" --sdk "$PWD/build/qualification-minix/sdk" --iso "$PWD/build/qualification-minix/minix_R3.3.0-588a35b.iso"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -32,6 +45,9 @@ jobs:
             build/qualification-${{ matrix.os }}/**/*.json
             build/qualification-${{ matrix.os }}/**/*.log
             build/qualification-${{ matrix.os }}/**/*.tsv
+            build/qualification-${{ matrix.os }}-rng-*/**/*.json
+            build/qualification-${{ matrix.os }}-rng-*/**/*.log
+            build/qualification-${{ matrix.os }}-rng-*/**/*.tsv
   genode:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -73,6 +89,12 @@ jobs:
           python3 ports/genode/boot.py --genode-dir "$GENODE_SOURCE" --scenario drift_pcspkr_denied
       - name: Boot the separate no-I/O component model
         run: python3 ports/genode/component-model/run.py --genode-dir "$GENODE_SOURCE" --toolchain-prefix "$GENODE_PREFIX"
+      - name: Actual Virtio RNG resources and source imports
+        run: |
+          for scenario in rng_probe rng_resources rng_resources_denied rng_linux rng_windows rng_linux_shootout rng_windows_shootout; do
+            python3 ports/genode/virtio-rng/build.py --genode-dir "$GENODE_SOURCE" --toolchain-prefix "$GENODE_PREFIX" --build-dir "$PWD/build/genode-rng" --scenario "$scenario"
+            python3 ports/genode/virtio-rng/boot.py --genode-dir "$GENODE_SOURCE" --build-dir "$PWD/build/genode-rng" --scenario "$scenario" --qemu "$(command -v qemu-system-x86_64)" --qemu-data /usr/share/qemu --bios /usr/share/seabios/bios-256k.bin --module-dir /usr/lib/x86_64-linux-gnu/qemu
+          done
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -83,3 +105,6 @@ jobs:
             build/genode-component-model/**/*.json
             build/genode-component-model/**/*.log
             build/genode-component-model/**/*.tsv
+            build/genode-rng/**/*.json
+            build/genode-rng/**/*.log
+            build/genode-rng/**/*.tsv

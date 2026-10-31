@@ -52,11 +52,18 @@ profile, and the [Linux/Windows target and qualification plan](docs/compatibilit
 This is separate from the native
 Nelua drivers below; it is not a loader for Linux kernel modules.
 
-The first opt-in profiles compile an unchanged
+The opt-in profiles compile unchanged
 [Linux PC-speaker driver](imports/linux/pcspkr) and
 [Windows KMDF mouse filter](imports/windows/moufiltr). Their compatibility
 runtimes are Nelua. Source/profile tests establish their documented API subsets;
 they do not establish arbitrary `.ko`/`.sys` loading or hardware support.
+
+The [Linux Virtio RNG](imports/linux/virtio-rng) and
+[Windows Virtio RNG](imports/windows/viorng) profiles add actual asynchronous
+queue/DMA imports. Their separate [Linux/Windows](ports/linux/virtio-rng),
+[MINIX](ports/minix/virtio-rng) and [Genode](ports/genode/virtio-rng) recipes
+check real emulated-device data, completion, cancellation and teardown.
+Source profiles stay outside the default MIT-only libraries and install.
 
 Run the verified emulated-device examples on [Linux](ports/linux),
 [Genode](ports/genode) and [MINIX](ports/minix). The native Windows CI job runs

@@ -82,6 +82,29 @@ Keep the instance, register windows and buffers alive; retry
 `drift_virtio_close` after the host has made reset possible. Never free storage
 while the device may still DMA into it.
 
+## Queues for source-import frameworks
+
+The `drift_virtio_raw_*` interface exposes a bounded asynchronous split queue
+without implementing a device class in the host. Deferred open negotiates
+`VERSION_1`, creates one or two queues and leaves `DRIVER_OK` unset (state 4).
+`raw_device_ready` enters state 5. Class operations retain their separate
+state 2. Each raw queue has one descriptor and one transfer in flight.
+
+The caller supplies coherent DMA and a zero-initialized
+`drift_virtio_raw_transfer`. `raw_add` publishes its descriptor;
+`raw_kick` notifies the device; `raw_get` validates the actual used ring,
+acquires DMA visibility and returns its cookie and used length once.
+Keep the transfer, mapping and owning device alive until completion or a
+successful reset. Native close releases its internal rings, never the
+caller's payload allocation. Failed reset quarantines both ownership records
+and internal allocations; retry close before reclaiming external storage.
+
+The Linux `virtio-rng` and Windows `viorng` source profiles use these queues.
+Their framework personalities remain in Nelua; OS adapters supply generic
+PCI, MMIO, DMA, synchronization and time. Public native structure layouts
+grew to hold raw-transfer ownership, so rebuild native consumers and libraries
+together. The bytecode VM ABI is unchanged.
+
 ## Evidence
 
 `tests/test_virtio.c` is an independent MMIO/PCI device model. Its CPU and device

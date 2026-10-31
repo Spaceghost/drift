@@ -1,0 +1,54 @@
+-- Source profile types and primitives. SPDX-License-Identifier: MIT
+local T:type=@record{}
+local T.Host:type <cimport 'drift_win_rng_host',cinclude '"profile.h"',forwarddecl> = @record{}
+local T.State:type <cimport 'drift_win_rng',cinclude '"profile.h"'> = @record{
+ host:*T.Host,hw:pointer,pci:pointer,bars:pointer,
+ mode:uint32,region:uint32,bdf:uint32,phase:uint32,depth:uint32,locked:uint32,configured:uint32,prepared:uint32,powered:uint32,
+ callbacks:uint32,dpc:uint32,irq_latch:uint32,latch_ready:uint32,latch_length:uint32,
+ pool_used:uint32,pool_quarantined:uint32,pending_count:uint32,notify_count:uint32,dispatching:uint32,
+ error:int32,last_error:int32,latch_cookie:pointer,active:pointer
+}
+local T.Object:type <cimport 'drift_win_rng_object',cinclude '"profile.h"'> = @record{owner:*T.State,kind:uint32}
+local T.Request:type <cimport 'drift_win_rng_request',cinclude '"profile.h"'> = @record{
+ owner:*T.State,output:*[0]uint8,capacity:csize,length:csize,
+ phase:uint32,cancelable:uint32,cancel_owned:uint32,notifying:uint32,completions:uint32,status:int32,information:usize
+}
+local T.Cancel:type=@function(*T.Request):void
+local T.Queue:type <cimport 'drift_rng_virtqueue',cinclude '"profile.h"'> = @record{owner:*T.State,index:uint32}
+local T.VDevice:type <cimport 'VirtIODevice',cinclude '"profile.h"'> = @record{owner:*T.State}
+local T.VDriver:type <cimport 'VIRTIO_WDF_DRIVER',cinclude '"profile.h"'> = @record{VIODevice:T.VDevice,owner:*T.State}
+local T.Physical:type <cimport 'PHYSICAL_ADDRESS',cinclude '"profile.h"'> = @record{QuadPart:int64}
+local T.SG:type <cimport 'drift_rng_sg',cinclude '"profile.h"'> = @record{physAddr:T.Physical,length:uint32}
+local T.DMA:type <cimport 'drift_dma',cinclude '"profile.h"'> = @record{data:*[0]uint8,address:uint64,size:uint32,token:uint64}
+local T.INVALID:int32=-1073741811
+local T.STATE:int32=-1073741436
+local T.UNSUCCESSFUL:int32=-1073741823
+local T.OOM:int32=-1073741670
+local T.CANCELLED:int32=-1073741536
+local T.SMALL:int32=-1073741789
+local T.UNSUPPORTED:int32=-1073741637
+local T.IOERROR:int32=-1073741435
+local T.TIMEOUT:int32=-1073741643
+local T.BUSY:int32=-2147483631
+local T.PENDING:int32=0x103
+function T.object(s:*T.State,k:uint32):*T.Object <cimport 'drift_rng_object',cinclude '"profile.h"'> end
+function T.current():*T.State <cimport 'drift_win_rng_current',cinclude '"profile.h"'> end
+function T.owner(o:*T.Object,k:uint32):*T.State
+ if o==nilptr or o.owner==nilptr or o.kind~=k then return nilptr end
+ if o~=T.object(o.owner,k) or o.owner.phase==0 then return nilptr end
+ return o.owner
+end
+function T.fail(s:*T.State,status:int32)
+ if s~=nilptr then
+  if s.error==0 then s.error=status end
+  s.last_error=status
+ end
+end
+function T.native_error(n:int32):int32
+ if n==-2 then return T.TIMEOUT end
+ if n==-6 then return T.OOM end
+ if n==-4 then return T.UNSUPPORTED end
+ if n==-1 or n==-3 then return T.INVALID end
+ return T.IOERROR
+end
+return T

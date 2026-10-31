@@ -15,7 +15,7 @@ NATIVE_OBJECTS = $(addprefix build/native-,$(addsuffix .o,$(NATIVE)))
 NATIVE_TESTS = $(addprefix build/test_,$(NATIVE))
 PUBLIC_HEADERS = include/drift.h include/drift_hw.h $(addprefix include/drift_,$(addsuffix .h,$(NATIVE)))
 
-.PHONY: all check example demo install sanitize freestanding freestanding32 regen verify-generated clean size FORCE native-check native-sanitize native-regen qemu-check kernel-check linux-check linux-sanitize linux-regen linux-verify-generated windows-check windows-sanitize windows-regen windows-verify-generated linux-bench benchmark-check
+.PHONY: all check example demo install sanitize freestanding freestanding32 regen verify-generated clean size FORCE native-check native-sanitize native-regen qemu-check kernel-check linux-check linux-sanitize linux-regen linux-verify-generated windows-check windows-sanitize windows-regen windows-verify-generated linux-bench benchmark-check linux-rng-check linux-rng-sanitize linux-rng-verify-generated windows-rng-check windows-rng-sanitize windows-rng-verify-generated
 all: build/drift build/drift-keyboard build/libdrift.a build/libdrift-native.a
 
 build:
@@ -90,6 +90,26 @@ windows-regen:
 
 windows-verify-generated:
 	$(MAKE) -C imports/windows/moufiltr verify-generated NELUA="$(NELUA)"
+
+# Useful DMA source profiles remain opt-in and separately licensed. The Linux
+# source stores a pointer in unsigned long: use LP64 or ILP32, never LLP64.
+linux-rng-check:
+	$(MAKE) -C imports/linux/virtio-rng check BUILD="$(CURDIR)/build/linux-virtio-rng" CC="$(CC)" AR="$(AR)" NM="$(NM)" CFLAGS="$(CFLAGS)"
+
+linux-rng-sanitize:
+	$(MAKE) -C imports/linux/virtio-rng sanitize BUILD="$(CURDIR)/build/linux-virtio-rng" CC="$(CC)"
+
+linux-rng-verify-generated:
+	$(MAKE) -C imports/linux/virtio-rng verify-generated BUILD="$(CURDIR)/build/linux-virtio-rng" NELUA="$(NELUA)"
+
+windows-rng-check:
+	$(MAKE) -C imports/windows/viorng check lto-check BUILD="$(CURDIR)/build/windows-viorng" CC="$(CC)" AR="$(AR)" NM="$(NM)" CFLAGS="$(CFLAGS)"
+
+windows-rng-sanitize:
+	$(MAKE) -C imports/windows/viorng sanitize BUILD="$(CURDIR)/build/windows-viorng" CC="$(CC)"
+
+windows-rng-verify-generated:
+	$(MAKE) -C imports/windows/viorng verify-generated BUILD="$(CURDIR)/build/windows-viorng" NELUA="$(NELUA)"
 
 # Component-model diagnostic, never hardware or native-kernel performance.
 # Build both paths together with identical flags; don't reuse a differently

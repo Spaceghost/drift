@@ -15,6 +15,8 @@ typedef struct model {
     uint32_t offered,accepted[2],version,maximum;
     unsigned allocations,releases,drop,bad_id,bad_length,bad_index,io_error,reset_stuck,fail_alloc;
     unsigned high_features,reject_features,unstable_generation,generation,head_id;
+    unsigned notifications,zero_length,external_mask,external_release_allowed;
+    unsigned payload_acquires,payload_publishes,last_payload_acquire_status;
     uint64_t time;
     uint8_t disk[256*512],sent[2048]; unsigned sent_size;
 } model;
@@ -40,7 +42,7 @@ static void used(model *m,unsigned index,uint32_t length)
     queue *q=&m->queue[index];
     uint8_t *ring=device(m,q->used,68);
     put(ring+4+(q->produced&7)*8,m->bad_id?8:m->head_id,4);
-    put(ring+8+(q->produced&7)*8,m->bad_length?UINT32_MAX:length,4);
+    put(ring+8+(q->produced&7)*8,m->bad_length?UINT32_MAX:m->zero_length?0:length,4);
     q->produced+=(uint16_t)(m->bad_index?2:1);
     put(ring+2,q->produced,2);
 }
@@ -139,7 +141,7 @@ static void write_reg(void *context,uint32_t region,uint32_t offset,uint32_t wid
         if(offset==0x20){CHECK(m->driver_select<2);m->accepted[m->driver_select]=(uint32_t)value;return;}
         if(offset==0x30){CHECK(value<2);m->queue_select=(uint32_t)value;return;}
         if(offset==0x70){status_write(m,value);return;}
-        if(offset==0x50){CHECK(value<2);service(m,(unsigned)value);return;}
+        if(offset==0x50){CHECK(value<2);++m->notifications;service(m,(unsigned)value);return;}
         queue *q=&m->queue[m->queue_select];
         if(offset==0x38){CHECK(value==8);return;}
         if(offset==0x44){q->enabled=(unsigned)value;return;}
@@ -153,7 +155,7 @@ static void write_reg(void *context,uint32_t region,uint32_t offset,uint32_t wid
     }
     if(region==1) {
         CHECK(width==2 && value<2 && offset==0x200+value*3*4);
-        service(m,(unsigned)value); return;
+        ++m->notifications;service(m,(unsigned)value); return;
     }
     CHECK(region==0 && offset>=0x100); offset-=0x100;
     if(offset==0){m->feature_select=(uint32_t)value;return;}
@@ -187,7 +189,10 @@ static int32_t allocate(void *context,uint32_t size,uint32_t alignment,drift_dma
 }
 static void release(void *context,drift_dma *buffer)
 {
-    model *m=context;allocation *a=&m->allocation[buffer->token];
+    model *m=context;CHECK(buffer->token<8);allocation *a=&m->allocation[buffer->token];
+    /* External mappings are caller-owned even after their transfer completes.
+     * Only the test's explicit, post-reset release may relinquish them. */
+    if(m->external_mask&(1u<<buffer->token))CHECK(m->external_release_allowed&(1u<<buffer->token));
     CHECK(a->live && buffer->data==a->cpu && m->status==0);
     free(a->cpu);free(a->device);a->live=0;++m->releases;
     buffer->data=NULL;
@@ -196,7 +201,12 @@ static void sync_dma(void *context,drift_dma *buffer,uint32_t offset,uint32_t le
 {
     model *m=context;allocation *a=&m->allocation[buffer->token];
     CHECK(a->live && offset<=a->size && length<=a->size-offset);
+    CHECK(buffer->data==a->cpu && buffer->address==a->address && buffer->size==a->size);
     CHECK(direction>=1&&direction<=3);
+    if(m->external_mask&(1u<<buffer->token)) {
+        if(direction==DRIFT_DMA_FROM_DEVICE){++m->payload_acquires;m->last_payload_acquire_status=m->status;}
+        else ++m->payload_publishes;
+    }
     if(direction==2) memcpy(a->cpu+offset,a->device+offset,length);
     else memcpy(a->device+offset,a->cpu+offset,length);
 }
@@ -244,6 +254,207 @@ static void pci_setup(pci_fixture *p,drift_pci *pci,drift_virtio_bar *bindings,u
     p->word[0x68/4]=2;p->word[0x6c/4]=0x300;p->word[0x70/4]=8;
     for(unsigned i=0;i<6;i++)bindings[i]=(drift_virtio_bar){i<3?i:UINT32_MAX,i<3?4096:0};
     *pci=(drift_pci){p,pci_read_test,pci_write_test};
+}
+static int raw_open(drift_virtio *d,drift_hw *h,model *m,unsigned queues)
+{
+    return m->transport?drift_virtio_raw_open_pci(d,h,0,0x100,1,0x200,4,2,0x300,m->id,queues):
+        drift_virtio_raw_open_mmio(d,h,0,m->id,queues);
+}
+static void raw_allocate(model *m,drift_dma *mapping)
+{
+    CHECK(allocate(m,256,4096,mapping)==0);
+    CHECK(mapping->address>=UINT64_C(0x100000000));
+    CHECK(mapping->data!=device(m,mapping->address,mapping->size));
+    m->external_mask|=1u<<mapping->token;
+}
+static void raw_release(model *m,drift_dma *mapping)
+{
+    CHECK(m->status==0);
+    m->external_release_allowed|=1u<<mapping->token;
+    release(m,mapping);
+    m->external_mask&=~(1u<<mapping->token);
+}
+static void raw_incoming(model *m,unsigned transport)
+{
+    drift_hw h;drift_virtio d={0},foreign={0};drift_dma payload;
+    drift_virtio_raw_transfer transfer={0},other={0};
+    unsigned marker=0;void *cookie=(void *)1;uint32_t length=99;
+    init(m,&h,transport,4);
+    CHECK(raw_open(&d,&h,m,1)==0);
+    CHECK(d.state==4 && d.capacity==1 && m->status==11);
+    CHECK(m->accepted[0]==0 && m->accepted[1]==1 && !m->notifications);
+    CHECK(d.queue[0].ring.data && !d.queue[0].buffer.data && !d.queue[1].ring.data);
+    unsigned internal=m->allocations;
+    raw_allocate(m,&payload);memset(payload.data,0xcc,payload.size);
+    CHECK(drift_virtio_raw_add(&d,0,&transfer,&payload,64,64,DRIFT_DMA_FROM_DEVICE,&marker)<0);
+    CHECK(!transfer.active && !m->notifications && !m->queue[0].seen && !m->queue[0].produced);
+    CHECK(drift_virtio_entropy(&d,payload.data,64)<0);
+    CHECK(drift_virtio_raw_device_ready(&d)==0);
+    CHECK(d.state==5 && m->status==15 && !m->notifications);
+    CHECK(drift_virtio_raw_device_ready(&d)<0);
+    CHECK(drift_virtio_raw_get(&d,0,&transfer,&cookie,&length)==0);
+    CHECK(!cookie && !length);
+    CHECK(drift_virtio_raw_kick(&d,0)<0);
+    CHECK(drift_virtio_raw_add(NULL,0,&transfer,&payload,0,64,DRIFT_DMA_FROM_DEVICE,&marker)<0);
+    CHECK(drift_virtio_raw_add(&d,1,&transfer,&payload,0,64,DRIFT_DMA_FROM_DEVICE,&marker)<0);
+    CHECK(drift_virtio_raw_add(&d,0,NULL,&payload,0,64,DRIFT_DMA_FROM_DEVICE,&marker)<0);
+    CHECK(drift_virtio_raw_add(&d,0,&transfer,NULL,0,64,DRIFT_DMA_FROM_DEVICE,&marker)<0);
+    CHECK(drift_virtio_raw_add(&d,0,&transfer,&payload,0,64,DRIFT_DMA_FROM_DEVICE,NULL)<0);
+    CHECK(drift_virtio_raw_add(&d,0,&transfer,&payload,0,64,DRIFT_DMA_BIDIRECTIONAL,&marker)<0);
+    CHECK(drift_virtio_raw_add(&d,0,&transfer,&payload,0,0,DRIFT_DMA_FROM_DEVICE,&marker)<0);
+    CHECK(drift_virtio_raw_add(&d,0,&transfer,&payload,257,1,DRIFT_DMA_FROM_DEVICE,&marker)<0);
+    CHECK(drift_virtio_raw_add(&d,0,&transfer,&payload,255,2,DRIFT_DMA_FROM_DEVICE,&marker)<0);
+    drift_dma invalid=payload;invalid.data=NULL;
+    CHECK(drift_virtio_raw_add(&d,0,&transfer,&invalid,0,64,DRIFT_DMA_FROM_DEVICE,&marker)<0);
+    invalid=payload;invalid.address=UINT64_MAX-31;
+    CHECK(drift_virtio_raw_add(&d,0,&transfer,&invalid,32,1,DRIFT_DMA_FROM_DEVICE,&marker)<0);
+    CHECK(drift_virtio_raw_add(&d,0,&transfer,&invalid,0,64,DRIFT_DMA_FROM_DEVICE,&marker)<0);
+    CHECK(!transfer.active && !d.queue[0].pending && !m->notifications && !m->payload_publishes);
+    CHECK(drift_virtio_raw_add(&d,0,&transfer,&payload,64,64,DRIFT_DMA_FROM_DEVICE,&marker)==0);
+    CHECK(transfer.active && transfer.owner==&d && transfer.queue==0 && transfer.cookie==&marker);
+    CHECK(transfer.mapping.data==payload.data && transfer.mapping.address==payload.address &&
+        transfer.mapping.size==payload.size && transfer.mapping.token==payload.token);
+    CHECK(transfer.offset==64 && transfer.length==64 && transfer.direction==DRIFT_DMA_FROM_DEVICE);
+    CHECK(m->payload_publishes==1 && !m->payload_acquires && !m->notifications);
+    CHECK(get(device(m,m->queue[0].desc,16),8)==payload.address+64);
+    CHECK(get(device(m,m->queue[0].desc+8,8),4)==64);
+    CHECK(get(device(m,m->queue[0].desc+12,4),2)==2);
+    CHECK(get(device(m,m->queue[0].avail+2,2),2)==1 && !m->queue[0].seen);
+    CHECK(drift_virtio_raw_add(&d,0,&other,&payload,0,32,DRIFT_DMA_FROM_DEVICE,&marker)<0);
+    CHECK(drift_virtio_raw_add(&d,0,&transfer,&payload,0,32,DRIFT_DMA_FROM_DEVICE,&marker)<0);
+    CHECK(drift_virtio_raw_get(&d,0,&other,&cookie,&length)<0);
+    CHECK(drift_virtio_raw_get(&d,0,&transfer,NULL,&length)<0);
+    CHECK(drift_virtio_raw_get(&d,0,&transfer,&cookie,NULL)<0);
+    CHECK(drift_virtio_raw_get(&d,1,&transfer,&cookie,&length)<0);
+    void *owner=transfer.owner;transfer.owner=&foreign;
+    CHECK(drift_virtio_raw_get(&d,0,&transfer,&cookie,&length)<0);transfer.owner=owner;
+    unsigned queue_index=transfer.queue;transfer.queue=1;
+    CHECK(drift_virtio_raw_get(&d,0,&transfer,&cookie,&length)<0);transfer.queue=queue_index;
+    CHECK(drift_virtio_raw_get(&d,0,&transfer,&cookie,&length)==0);
+    CHECK(!cookie && !length && transfer.active && !m->payload_acquires);
+    CHECK(drift_virtio_raw_kick(&d,0)==0 && m->notifications==1);
+    CHECK(m->queue[0].seen==1 && m->queue[0].produced==1);
+    for(unsigned i=0;i<payload.size;i++)CHECK(payload.data[i]==0xcc);
+    CHECK(drift_virtio_raw_get(&d,0,&transfer,&cookie,&length)==1);
+    CHECK(cookie==&marker && length==64 && !transfer.active && !transfer.owner);
+    CHECK(m->payload_acquires==1 && m->last_payload_acquire_status==15);
+    for(unsigned i=0;i<payload.size;i++)CHECK(payload.data[i]==(i>=64&&i<128?(uint8_t)((i-64)*17+9):0xcc));
+    CHECK(drift_virtio_raw_get(&d,0,&transfer,&cookie,&length)==0 && !cookie && !length);
+    CHECK(drift_virtio_raw_kick(&d,0)<0);
+    CHECK(drift_virtio_entropy(&d,payload.data,64)<0);
+    /* Reuse the returned context, and preserve legal generic zero-used results. */
+    m->zero_length=1;
+    CHECK(drift_virtio_raw_add(&d,0,&transfer,&payload,0,32,DRIFT_DMA_FROM_DEVICE,&marker)==0);
+    CHECK(drift_virtio_raw_kick(&d,0)==0);
+    CHECK(drift_virtio_raw_get(&d,0,&transfer,&cookie,&length)==1 && cookie==&marker && length==0);
+    CHECK(drift_virtio_raw_get(&d,0,&transfer,&cookie,&length)==0 && !cookie && !length);
+    /* Raw transfers preserve the split-ring's 16-bit index wrap too. */
+    m->zero_length=0;
+    d.queue[0].available=d.queue[0].used=65535;
+    m->queue[0].seen=m->queue[0].produced=65535;
+    put(device(m,m->queue[0].used,68)+2,65535,2);
+    CHECK(drift_virtio_raw_add(&d,0,&transfer,&payload,0,16,DRIFT_DMA_FROM_DEVICE,&marker)==0);
+    CHECK(drift_virtio_raw_kick(&d,0)==0);
+    CHECK(drift_virtio_raw_get(&d,0,&transfer,&cookie,&length)==1 && cookie==&marker && length==16);
+    CHECK(!d.queue[0].available && !d.queue[0].used && !m->queue[0].seen && !m->queue[0].produced);
+    CHECK(drift_virtio_close(&d)==0 && !m->status && d.state==0);
+    CHECK(m->releases==internal && m->allocation[payload.token].live);
+    raw_release(m,&payload);CHECK(m->allocations==m->releases);
+}
+static void raw_duplex(model *m,unsigned transport)
+{
+    drift_hw h;drift_virtio d={0};drift_dma incoming,outgoing;
+    drift_virtio_raw_transfer rx={0},tx={0};
+    unsigned rx_marker=1,tx_marker=2;void *cookie=NULL;uint32_t length=0;
+    init(m,&h,transport,3);CHECK(raw_open(&d,&h,m,2)==0);
+    CHECK(d.state==4 && m->status==11 && d.queue[0].ring.data && d.queue[1].ring.data);
+    CHECK(!d.queue[0].buffer.data && !d.queue[1].buffer.data);
+    unsigned internal=m->allocations;
+    raw_allocate(m,&incoming);raw_allocate(m,&outgoing);
+    memset(incoming.data,0xcd,incoming.size);memcpy(outgoing.data+16,"hello",5);
+    CHECK(drift_virtio_raw_device_ready(&d)==0);
+    CHECK(drift_virtio_raw_add(&d,0,&rx,&incoming,32,64,DRIFT_DMA_FROM_DEVICE,&rx_marker)==0);
+    CHECK(drift_virtio_raw_add(&d,1,&tx,&outgoing,16,5,DRIFT_DMA_TO_DEVICE,&tx_marker)==0);
+    CHECK(rx.active && tx.active && !m->notifications);
+    CHECK(get(device(m,m->queue[1].desc,16),8)==outgoing.address+16);
+    CHECK(get(device(m,m->queue[1].desc+8,8),4)==5);
+    CHECK(get(device(m,m->queue[1].desc+12,4),2)==0);
+    CHECK(!memcmp(device(m,outgoing.address+16,5),"hello",5));
+    CHECK(drift_virtio_raw_kick(&d,0)==0 && m->notifications==1);
+    CHECK(drift_virtio_raw_kick(&d,1)==0 && m->notifications==2);
+    CHECK(m->sent_size==5 && !memcmp(m->sent,"hello",5));
+    CHECK(drift_virtio_raw_get(&d,1,&tx,&cookie,&length)==1 && cookie==&tx_marker && length==0);
+    CHECK(rx.active && !tx.active && !m->payload_acquires);
+    CHECK(drift_virtio_raw_get(&d,0,&rx,&cookie,&length)==0 && !cookie && !length);
+    inject(m,(const uint8_t *)"asynchronous",12);
+    for(unsigned i=0;i<incoming.size;i++)CHECK(incoming.data[i]==0xcd);
+    CHECK(drift_virtio_raw_get(&d,0,&rx,&cookie,&length)==1 && cookie==&rx_marker && length==12);
+    CHECK(!memcmp(incoming.data+32,"asynchronous",12) && m->payload_acquires==1);
+    CHECK(drift_virtio_close(&d)==0 && m->releases==internal);
+    CHECK(m->allocation[incoming.token].live && m->allocation[outgoing.token].live);
+    raw_release(m,&incoming);raw_release(m,&outgoing);CHECK(m->allocations==m->releases);
+}
+static void raw_failures(model *m,unsigned transport)
+{
+    for(unsigned failure=0;failure<4;failure++)for(unsigned stuck=0;stuck<2;stuck++) {
+        drift_hw h;drift_virtio d={0};drift_dma payload;drift_virtio_raw_transfer transfer={0};
+        unsigned marker=0;void *cookie=(void *)1;uint32_t length=99;
+        init(m,&h,transport,4);CHECK(raw_open(&d,&h,m,1)==0);
+        unsigned internal=m->allocations;
+        raw_allocate(m,&payload);memset(payload.data,0xce,payload.size);
+        CHECK(drift_virtio_raw_device_ready(&d)==0);d.timeout_us=30;
+        m->bad_id=failure==0;m->bad_length=failure==1;m->bad_index=failure==2;m->drop=failure==3;
+        m->reset_stuck=stuck;
+        CHECK(drift_virtio_raw_add(&d,0,&transfer,&payload,0,64,DRIFT_DMA_FROM_DEVICE,&marker)==0);
+        CHECK(drift_virtio_raw_kick(&d,0)==0);
+        if(failure==3){CHECK(drift_virtio_raw_get(&d,0,&transfer,&cookie,&length)==0);wait_us(m,31);}
+        CHECK(drift_virtio_raw_get(&d,0,&transfer,&cookie,&length)==(failure==3?-2:-5));
+        CHECK(!cookie && !length && !m->payload_acquires);
+        CHECK(m->allocation[payload.token].live);
+        for(unsigned i=0;i<payload.size;i++)CHECK(payload.data[i]==0xce);
+        if(stuck) {
+            CHECK(d.state==3 && m->status==15 && transfer.active && transfer.owner==&d && !m->releases);
+            CHECK(drift_virtio_close(&d)==-2 && transfer.active && !m->releases);
+            m->reset_stuck=0;CHECK(drift_virtio_close(&d)==0);
+        }
+        CHECK(d.state==0 && m->status==0 && !transfer.active && !transfer.owner && m->releases==internal);
+        CHECK(m->allocation[payload.token].live);
+        raw_release(m,&payload);CHECK(m->allocations==m->releases);
+    }
+}
+static void raw_api_checks(model *m)
+{
+    for(unsigned transport=0;transport<2;transport++) {
+        raw_incoming(m,transport);raw_duplex(m,transport);raw_failures(m,transport);
+    }
+    drift_hw h;drift_virtio d={0};drift_dma payload;drift_virtio_raw_transfer transfer={0};unsigned marker=0;
+    init(m,&h,0,4);
+    CHECK(drift_virtio_raw_open_mmio(NULL,&h,0,4,1)<0);
+    CHECK(drift_virtio_raw_open_mmio(&d,&h,0,4,0)<0);
+    CHECK(drift_virtio_raw_open_mmio(&d,&h,0,4,3)<0);
+    CHECK(drift_virtio_raw_device_ready(&d)<0 && !m->allocations);
+    CHECK(raw_open(&d,&h,m,1)==0 && d.state==4 && m->status==11);
+    CHECK(drift_virtio_close(&d)==0 && m->status==0 && m->allocations==m->releases);
+    init(m,&h,0,4);
+    CHECK(open_device(&d,&h,m)==0);raw_allocate(m,&payload);
+    CHECK(drift_virtio_raw_device_ready(&d)<0);
+    CHECK(drift_virtio_raw_add(&d,0,&transfer,&payload,0,64,DRIFT_DMA_FROM_DEVICE,&marker)<0);
+    CHECK(!transfer.active && d.state==2);
+    CHECK(drift_virtio_close(&d)==0);raw_release(m,&payload);CHECK(m->allocations==m->releases);
+    pci_fixture fixture;drift_pci pci;drift_virtio_bar bindings[6];
+    init(m,&h,1,4);pci_setup(&fixture,&pci,bindings,4);
+    CHECK(drift_virtio_raw_open_function(&d,&h,&pci,0x1234,bindings,3,1)<0);
+    CHECK(!d.state && !m->allocations);
+    CHECK(drift_virtio_raw_open_function(&d,&h,&pci,0x1234,bindings,4,1)==0);
+    CHECK(d.state==4 && m->status==11);CHECK(drift_virtio_raw_device_ready(&d)==0);
+    CHECK(drift_virtio_close(&d)==0 && m->allocations==m->releases);
+    /* Entropy has no device-specific configuration. A real modern RNG may
+     * expose only common and notification capabilities. */
+    init(m,&h,1,4);pci_setup(&fixture,&pci,bindings,4);
+    fixture.word[0x50/4]&=~0xff00u;bindings[2]=(drift_virtio_bar){UINT32_MAX,0};
+    CHECK(drift_virtio_raw_open_function(&d,&h,&pci,0x1234,bindings,4,1)==0);
+    CHECK(d.state==4 && m->status==11);CHECK(drift_virtio_raw_device_ready(&d)==0);
+    CHECK(drift_virtio_close(&d)==0 && m->allocations==m->releases);
 }
 int main(void)
 {
@@ -365,5 +576,6 @@ int main(void)
     pc.word[0x64/4]|=0x74u<<8;pc.word[0x74/4]=(5u<<24)|(20u<<16)|9; /* unused PCI_CFG capability */
     CHECK(drift_virtio_open_function(&d,&h,&pci,0x1234,bindings)==0);CHECK(drift_virtio_close(&d)==0);
     CHECK(drift_virtio_open_function(&d,&h,&pci,0x1234,NULL)==-1);
-    free(m);printf("virtio: %u checks passed (MMIO/PCI; block, net, console, entropy, input)\n",checks);return 0;
+    raw_api_checks(m);
+    free(m);printf("virtio: %u checks passed (MMIO/PCI; block, net, console, entropy, input; raw external DMA)\n",checks);return 0;
 }

@@ -5,9 +5,13 @@
 ## pragmas.nocstaticassert = true
 ## pragmas.unitname = 'drift_virtio'
 local hw = require 'drift.hw'
+local Transfer: type <cimport 'drift_virtio_raw_transfer', cinclude '"drift_virtio.h"'> = @record{
+  mapping:hw.DMA, cookie:pointer, owner:pointer, started_us:uint64,
+  queue:uint32, offset:uint32, length:uint32, direction:uint32, active:uint32
+}
 local Queue: type <cimport 'drift_virtqueue', cinclude '"drift_virtio.h"'> = @record{
   ring: hw.DMA, buffer: hw.DMA, available: uint16, used: uint16,
-  notify: uint32, pending: uint32, capacity: uint32
+  notify: uint32, pending: uint32, capacity: uint32, raw:*Transfer
 }
 local Device: type <cimport 'drift_virtio', cinclude '"drift_virtio.h"'> = @record{
   hw: *hw.Bus, queue: [2]Queue, capacity: uint64,
@@ -54,6 +58,9 @@ local function drift_virtio_close(d: *Device): int32 <cexport, codename 'drift_v
   if hw.valid(d.hw) == 0 then return -1 end
   if not reset(d) then d.state=3; return -2 end
   for i: uint32 = 0, 1 do
+    if d.queue[i].raw ~= nilptr then
+      d.queue[i].raw.active=0; d.queue[i].raw.owner=nilptr
+    end
     if d.queue[i].buffer.data ~= nilptr then hw.release(d.hw,&d.queue[i].buffer) end
     if d.queue[i].ring.data ~= nilptr then hw.release(d.hw,&d.queue[i].ring) end
     d.queue[i] = (@Queue){}
@@ -119,7 +126,8 @@ local function queue_init(d: *Device, index: uint32, capacity: uint32): boolean
     if notification*d.notify_multiplier+2>d.notify_length or offset > 0xfffffffd_u64 or (offset&1)~=0 then return false end
     q.notify=uint32(offset)
   end
-  if maximum < 8 or not allocate(d,&q.ring,4096) or not allocate(d,&q.buffer,capacity) then return false end
+  if maximum < 8 or not allocate(d,&q.ring,4096) then return false end
+  if capacity ~= 0 and not allocate(d,&q.buffer,capacity) then return false end
   q.capacity=capacity
   put(q.ring.data,128,1,2) -- suppress interrupts: this implementation polls
   hw.sync(d.hw,&q.ring,0,4096,3)
@@ -151,19 +159,25 @@ local function descriptor(q: *Queue, index: uint32, address: uint64, length: uin
   put(q.ring.data,index*16+12,flags,2)
   put(q.ring.data,index*16+14,next,2)
 end
-local function submit(d: *Device, index: uint32)
+local function publish(d: *Device, index: uint32)
   local q = &d.queue[index]
   put(q.ring.data,132+(uint32(q.available) & 7)*2,0,2)
   q.available=q.available+1
   -- Payload and descriptors precede publication of the available index.
-  hw.sync(d.hw,&q.buffer,0,q.capacity,3)
+  if q.buffer.data ~= nilptr then hw.sync(d.hw,&q.buffer,0,q.capacity,3) end
   hw.sync(d.hw,&q.ring,0,128,1)
   hw.sync(d.hw,&q.ring,132,16,1)
   put(q.ring.data,130,q.available,2)
   hw.sync(d.hw,&q.ring,128,20,1)
   q.pending=1
+end
+local function notify(d:*Device,index:uint32)
+  local q=&d.queue[index]
   if d.transport == 0 then hw.write(d.hw,d.region,0x50,4,index)
   else hw.write(d.hw,d.notify_region,q.notify,2,index) end
+end
+local function submit(d:*Device,index:uint32)
+  publish(d,index); notify(d,index)
 end
 local function poll(d: *Device, index: uint32, maximum: uint32): int32
   local q = &d.queue[index]
@@ -177,7 +191,7 @@ local function poll(d: *Device, index: uint32, maximum: uint32): int32
   local length=get(q.ring.data,264+(uint32(q.used)&7)*8,4)
   if length > maximum then return poison(d,-5) end
   q.used=used; q.pending=0
-  hw.sync(d.hw,&q.buffer,0,q.capacity,2)
+  if q.buffer.data ~= nilptr then hw.sync(d.hw,&q.buffer,0,q.capacity,2) end
   return int32(length)
 end
 local function finish(d: *Device, index: uint32, maximum: uint32): int32
@@ -209,19 +223,30 @@ local function input_post(d:*Device,index:uint32)
   if d.transport==0 then hw.write(d.hw,d.region,0x50,4,0)
   else hw.write(d.hw,d.notify_region,q.notify,2,0) end
 end
-local function start(d: *Device): int32
+local function start(d: *Device,ready_now:boolean,raw_queues:uint32): int32
   for i:uint32=0,5 do d.mac[i]=0 end
-  if d.device_id ~= 1 and d.device_id ~= 2 and d.device_id ~= 3 and d.device_id ~= 4 and d.device_id ~= 18 then return poison(d,-4) end
+  if ready_now then
+    if d.device_id ~= 1 and d.device_id ~= 2 and d.device_id ~= 3 and d.device_id ~= 4 and d.device_id ~= 18 then return poison(d,-4) end
+  elseif d.device_id==0 or d.device_id>63 or raw_queues==0 or raw_queues>2 then return poison(d,-4) end
   if not reset(d) then d.state=3; return -2 end
   set_status(d,1); set_status(d,3)
   if (feature(d,1)&1) == 0 then return poison(d,-4) end
   local offered=feature(d,0)
   d.features=0
-  if d.device_id == 1 then d.features=offered & 0x20 end -- MAC only; no offload
-  if d.device_id == 2 then d.features=offered & 0x220 end -- RO and FLUSH
+  if ready_now and d.device_id == 1 then d.features=offered & 0x20 end -- MAC only; no offload
+  if ready_now and d.device_id == 2 then d.features=offered & 0x220 end -- RO and FLUSH
   accept_feature(d,0,d.features); accept_feature(d,1,1)
   set_status(d,11)
   if (status(d)&8) == 0 then return poison(d,-4) end
+  if not ready_now then
+    -- Generic raw queues own only coherent ring allocations. Payload mappings
+    -- belong to the importing framework and are never released here.
+    for i:uint32=0,<raw_queues do
+      if not queue_init(d,i,0) then return poison(d,-6) end
+    end
+    d.capacity=raw_queues; d.state=4
+    return 0
+  end
   local capacity: uint32 = 4096
   if d.device_id == 1 then capacity=2048
   elseif d.device_id == 2 then capacity=65568
@@ -247,27 +272,30 @@ local function start(d: *Device): int32
   elseif d.device_id == 18 then for i:uint32=0,7 do input_post(d,i) end end
   return 0
 end
-local function drift_virtio_open_mmio(d: *Device,h: *hw.Bus,region:uint32,id:uint32): int32
-    <cexport, codename 'drift_virtio_open_mmio'>
+local function open_mmio_mode(d:*Device,h:*hw.Bus,region:uint32,id:uint32,ready_now:boolean,queues:uint32):int32
   if d == nilptr or hw.valid(h) == 0 or d.state ~= 0 then return -1 end
   if hw.read(h,region,0,4) ~= 0x74726976 or hw.read(h,region,4,4) ~= 2 or hw.read(h,region,8,4) ~= id then return -1 end
   d.hw=h; d.region=region; d.transport=0; d.device_id=id; d.timeout_us=1000000; d.state=1
-  return start(d)
+  return start(d,ready_now,queues)
+end
+local function drift_virtio_open_mmio(d:*Device,h:*hw.Bus,region:uint32,id:uint32):int32
+  <cexport,codename 'drift_virtio_open_mmio'>
+  return open_mmio_mode(d,h,region,id,true,0)
 end
 local function open_pci_bounded(d:*Device,h:*hw.Bus,common_region:uint32,common_offset:uint32,
-    notify_region:uint32,notify_offset:uint32,multiplier:uint32,device_region:uint32,device_offset:uint32,id:uint32,notify_length:uint32):int32
+    notify_region:uint32,notify_offset:uint32,multiplier:uint32,device_region:uint32,device_offset:uint32,id:uint32,notify_length:uint32,ready_now:boolean,queues:uint32):int32
   if d == nilptr or hw.valid(h) == 0 or d.state ~= 0 or common_offset > 0xffffffc0 or device_offset > 0xfffffeff or
       (common_offset&3)~=0 or (notify_offset&1)~=0 or (id==2 and (device_offset&3)~=0) then return -1 end
   d.hw=h; d.region=common_region; d.common_offset=common_offset
   d.notify_region=notify_region; d.notify_offset=notify_offset; d.notify_multiplier=multiplier; d.notify_length=notify_length
   d.device_region=device_region; d.device_offset=device_offset; d.transport=1
   d.device_id=id; d.timeout_us=1000000; d.state=1
-  return start(d)
+  return start(d,ready_now,queues)
 end
 local function drift_virtio_open_pci(d:*Device,h:*hw.Bus,common_region:uint32,common_offset:uint32,
     notify_region:uint32,notify_offset:uint32,multiplier:uint32,device_region:uint32,device_offset:uint32,id:uint32):int32
     <cexport,codename 'drift_virtio_open_pci'>
-  return open_pci_bounded(d,h,common_region,common_offset,notify_region,notify_offset,multiplier,device_region,device_offset,id,0xffffffff_u32-notify_offset)
+  return open_pci_bounded(d,h,common_region,common_offset,notify_region,notify_offset,multiplier,device_region,device_offset,id,0xffffffff_u32-notify_offset,true,0)
 end
 -- BAR mapping is a platform operation. Vendor capability interpretation is
 -- device logic and stays here, including ring-notification window bounds.
@@ -284,14 +312,15 @@ local function memory_bar(p:*PCI,bdf:uint32,index:uint32):boolean
   end
   return false -- a 64-bit BAR's upper half is not a separate resource
 end
-local function drift_virtio_open_function(d:*Device,h:*hw.Bus,p:*PCI,bdf:uint32,bars:*[0]Binding):int32
-  <cexport,codename 'drift_virtio_open_function'>
+local function open_function_mode(d:*Device,h:*hw.Bus,p:*PCI,bdf:uint32,bars:*[0]Binding,ready_now:boolean,expected:uint32,queues:uint32):int32
   if d==nilptr or d.state~=0 or hw.valid(h)==0 or pci_valid(p)==0 or bdf>65535 or bars==nilptr then return -1 end
   local identity=pci_read(p,bdf,0)
   local device_id=identity>>16
   if (identity&65535)~=0x1af4 or device_id<0x1041 or device_id>0x107f then return -4 end
   device_id=device_id-0x1040
-  if device_id~=1 and device_id~=2 and device_id~=3 and device_id~=4 and device_id~=18 then return -4 end
+  if ready_now then
+    if device_id~=1 and device_id~=2 and device_id~=3 and device_id~=4 and device_id~=18 then return -4 end
+  elseif device_id~=expected or queues==0 or queues>2 then return -4 end
   if ((pci_read(p,bdf,12)>>16)&127)~=0 then return -4 end
   local command=pci_read(p,bdf,4)
   if (command&6)~=6 then return -1 end
@@ -335,18 +364,90 @@ local function drift_virtio_open_function(d:*Device,h:*hw.Bus,p:*PCI,bdf:uint32,
           if notify_bar~=0xffffffff or length<20 or span<2 or (offset&1)~=0 then return -5 end
           notify_bar=bar;notify_offset=offset;notify_length=span;multiplier=pci_read(p,bdf,at+16)
         else
-          if device_bar~=0xffffffff or (device_id==2 and (span<8 or (offset&3)~=0)) or (device_id==1 and span<6) then return -5 end
+          if device_bar~=0xffffffff or (ready_now and device_id==2 and (span<8 or (offset&3)~=0)) or (ready_now and device_id==1 and span<6) then return -5 end
           device_bar=bar;device_offset=offset
         end
       end
     end
     at=(head>>8)&255
   end
-  if common_bar==0xffffffff or notify_bar==0xffffffff or ((device_id==1 or device_id==2) and device_bar==0xffffffff) then return -4 end
+  if common_bar==0xffffffff or notify_bar==0xffffffff or (ready_now and (device_id==1 or device_id==2) and device_bar==0xffffffff) then return -4 end
   local device_region:uint32=0
   if device_bar~=0xffffffff then device_region=bars[device_bar].region end
   return open_pci_bounded(d,h,bars[common_bar].region,common_offset,bars[notify_bar].region,
-    notify_offset,multiplier,device_region,device_offset,device_id,notify_length)
+    notify_offset,multiplier,device_region,device_offset,device_id,notify_length,ready_now,queues)
+end
+local function drift_virtio_open_function(d:*Device,h:*hw.Bus,p:*PCI,bdf:uint32,bars:*[0]Binding):int32
+  <cexport,codename 'drift_virtio_open_function'>
+  return open_function_mode(d,h,p,bdf,bars,true,0,0)
+end
+local function drift_virtio_raw_open_mmio(d:*Device,h:*hw.Bus,region:uint32,id:uint32,queues:uint32):int32
+  <cexport,codename 'drift_virtio_raw_open_mmio'>
+  if queues==0 or queues>2 or id==0 or id>63 then return -1 end
+  return open_mmio_mode(d,h,region,id,false,queues)
+end
+local function drift_virtio_raw_open_pci(d:*Device,h:*hw.Bus,cr:uint32,co:uint32,nr:uint32,no:uint32,nm:uint32,dr:uint32,doff:uint32,id:uint32,queues:uint32):int32
+  <cexport,codename 'drift_virtio_raw_open_pci'>
+  if queues==0 or queues>2 or id==0 or id>63 then return -1 end
+  return open_pci_bounded(d,h,cr,co,nr,no,nm,dr,doff,id,0xffffffff_u32-no,false,queues)
+end
+local function drift_virtio_raw_open_function(d:*Device,h:*hw.Bus,p:*PCI,bdf:uint32,bars:*[0]Binding,id:uint32,queues:uint32):int32
+  <cexport,codename 'drift_virtio_raw_open_function'>
+  if queues==0 or queues>2 or id==0 or id>63 then return -1 end
+  return open_function_mode(d,h,p,bdf,bars,false,id,queues)
+end
+local function drift_virtio_raw_device_ready(d:*Device):int32
+  <cexport,codename 'drift_virtio_raw_device_ready'>
+  if d==nilptr or d.state~=4 or d.capacity==0 or d.capacity>2 then return -1 end
+  set_status(d,15)
+  if (status(d)&0xcf)~=15 then return poison(d,-5) end
+  d.state=5
+  return 0
+end
+local function raw_queue(d:*Device,index:uint32):boolean
+  return d~=nilptr and d.state==5 and d.capacity>0 and d.capacity<=2 and index<d.capacity
+end
+local function drift_virtio_raw_add(d:*Device,index:uint32,t:*Transfer,mapping:*hw.DMA,offset:uint32,length:uint32,direction:uint32,cookie:pointer):int32
+  <cexport,codename 'drift_virtio_raw_add'>
+  if not raw_queue(d,index) or t==nilptr or mapping==nilptr or cookie==nilptr or mapping.data==nilptr or
+      (direction~=1 and direction~=2) then return -1 end
+  if length==0 or offset>mapping.size or length>mapping.size-offset or mapping.address>0xffffffffffffffff_u64-offset or
+      mapping.address+offset>0xffffffffffffffff_u64-length then return -3 end
+  local q=&d.queue[index]
+  if q.pending~=0 or q.raw~=nilptr or t.active~=0 then return -7 end
+  t.mapping=$mapping; t.cookie=cookie; t.owner=(@pointer)(d); t.queue=index
+  t.offset=offset; t.length=length; t.direction=direction; t.started_us=hw.time(d.hw); t.active=1
+  q.raw=t
+  hw.sync(d.hw,&t.mapping,offset,length,direction==2 and 3_u32 or 1_u32)
+  descriptor(q,0,mapping.address+offset,length,direction==2 and 2_u32 or 0_u32,0)
+  publish(d,index)
+  return 0
+end
+local function drift_virtio_raw_kick(d:*Device,index:uint32):int32
+  <cexport,codename 'drift_virtio_raw_kick'>
+  if not raw_queue(d,index) then return -1 end
+  local t=d.queue[index].raw
+  if t==nilptr or t.active==0 or t.owner~=(@pointer)(d) or t.queue~=index or d.queue[index].pending==0 then return -1 end
+  notify(d,index)
+  return 0
+end
+local function drift_virtio_raw_get(d:*Device,index:uint32,t:*Transfer,cookie:*pointer,length:*uint32):int32
+  <cexport,codename 'drift_virtio_raw_get'>
+  if not raw_queue(d,index) or t==nilptr or cookie==nilptr or length==nilptr then return -1 end
+  $cookie=nilptr; $length=0
+  local q=&d.queue[index]
+  if q.raw==nilptr and t.active==0 then return 0 end
+  if q.raw~=t or t.active==0 or t.owner~=(@pointer)(d) or t.queue~=index or q.pending==0 then return -1 end
+  local result=poll(d,index,t.direction==2 and t.length or 0_u32)
+  if result == -7 then
+    if hw.time(d.hw)-t.started_us>=d.timeout_us then return poison(d,-2) end
+    return 0
+  end
+  if result<0 then return result end
+  if t.direction==2 then hw.sync(d.hw,&t.mapping,t.offset,t.length,2) end
+  $cookie=t.cookie; $length=uint32(result)
+  q.raw=nilptr; t.active=0; t.owner=nilptr
+  return 1
 end
 local function ready(d:*Device,id:uint32):boolean
   return d ~= nilptr and d.state == 2 and d.device_id == id

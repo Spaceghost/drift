@@ -102,6 +102,7 @@ static uint32_t drift_virtio_status(drift_virtio_ptr d);
 static void drift_virtio_set_status(drift_virtio_ptr d, uint32_t value);
 static bool drift_virtio_reset(drift_virtio_ptr d);
 NELUA_CEXPORT int32_t drift_virtio_close(drift_virtio_ptr d);
+typedef drift_virtio_raw_transfer* drift_virtio_raw_transfer_ptr;
 static int32_t drift_virtio_poison(drift_virtio_ptr d, int32_t error_1);
 static uint32_t drift_virtio_feature(drift_virtio_ptr d, uint32_t selector);
 static void drift_virtio_accept_feature(drift_virtio_ptr d, uint32_t selector, uint32_t value);
@@ -112,20 +113,34 @@ static bool drift_virtio_allocate(drift_virtio_ptr d, drift_dma_ptr b, uint32_t 
 static bool drift_virtio_queue_init(drift_virtio_ptr d, uint32_t index, uint32_t capacity);
 typedef drift_virtqueue* drift_virtqueue_ptr;
 static void drift_virtio_descriptor(drift_virtqueue_ptr q, uint32_t index, uint64_t address, uint32_t length, uint32_t flags, uint32_t next);
+static void drift_virtio_publish(drift_virtio_ptr d, uint32_t index);
+static void drift_virtio_notify(drift_virtio_ptr d, uint32_t index);
 static void drift_virtio_submit(drift_virtio_ptr d, uint32_t index);
 static int32_t drift_virtio_poll(drift_virtio_ptr d, uint32_t index, uint32_t maximum);
 static int32_t drift_virtio_finish(drift_virtio_ptr d, uint32_t index, uint32_t maximum);
 static void drift_virtio_receive_post(drift_virtio_ptr d, uint32_t index);
 static void drift_virtio_input_post(drift_virtio_ptr d, uint32_t index);
-static int32_t drift_virtio_start(drift_virtio_ptr d);
+static int32_t drift_virtio_start(drift_virtio_ptr d, bool ready_now, uint32_t raw_queues);
 typedef drift_hw* drift_hw_ptr;
+static int32_t drift_virtio_open_mmio_mode(drift_virtio_ptr d, drift_hw_ptr h, uint32_t region, uint32_t id, bool ready_now, uint32_t queues);
 NELUA_CEXPORT int32_t drift_virtio_open_mmio(drift_virtio_ptr d, drift_hw_ptr h, uint32_t region, uint32_t id);
-static int32_t drift_virtio_open_pci_bounded(drift_virtio_ptr d, drift_hw_ptr h, uint32_t common_region, uint32_t common_offset, uint32_t notify_region, uint32_t notify_offset, uint32_t multiplier, uint32_t device_region, uint32_t device_offset, uint32_t id, uint32_t notify_length);
+static int32_t drift_virtio_open_pci_bounded(drift_virtio_ptr d, drift_hw_ptr h, uint32_t common_region, uint32_t common_offset, uint32_t notify_region, uint32_t notify_offset, uint32_t multiplier, uint32_t device_region, uint32_t device_offset, uint32_t id, uint32_t notify_length, bool ready_now, uint32_t queues);
 NELUA_CEXPORT int32_t drift_virtio_open_pci(drift_virtio_ptr d, drift_hw_ptr h, uint32_t common_region, uint32_t common_offset, uint32_t notify_region, uint32_t notify_offset, uint32_t multiplier, uint32_t device_region, uint32_t device_offset, uint32_t id);
 typedef drift_pci* drift_pci_ptr;
 static bool drift_virtio_memory_bar(drift_pci_ptr p, uint32_t bdf, uint32_t index);
 typedef drift_virtio_bar* drift_virtio_bar_arr0_ptr;
+static int32_t drift_virtio_open_function_mode(drift_virtio_ptr d, drift_hw_ptr h, drift_pci_ptr p, uint32_t bdf, drift_virtio_bar_arr0_ptr bars, bool ready_now, uint32_t expected, uint32_t queues);
 NELUA_CEXPORT int32_t drift_virtio_open_function(drift_virtio_ptr d, drift_hw_ptr h, drift_pci_ptr p, uint32_t bdf, drift_virtio_bar_arr0_ptr bars);
+NELUA_CEXPORT int32_t drift_virtio_raw_open_mmio(drift_virtio_ptr d, drift_hw_ptr h, uint32_t region, uint32_t id, uint32_t queues);
+NELUA_CEXPORT int32_t drift_virtio_raw_open_pci(drift_virtio_ptr d, drift_hw_ptr h, uint32_t cr, uint32_t co, uint32_t nr, uint32_t no, uint32_t nm, uint32_t dr, uint32_t doff, uint32_t id, uint32_t queues);
+NELUA_CEXPORT int32_t drift_virtio_raw_open_function(drift_virtio_ptr d, drift_hw_ptr h, drift_pci_ptr p, uint32_t bdf, drift_virtio_bar_arr0_ptr bars, uint32_t id, uint32_t queues);
+NELUA_CEXPORT int32_t drift_virtio_raw_device_ready(drift_virtio_ptr d);
+static bool drift_virtio_raw_queue(drift_virtio_ptr d, uint32_t index);
+NELUA_CEXPORT int32_t drift_virtio_raw_add(drift_virtio_ptr d, uint32_t index, drift_virtio_raw_transfer_ptr t, drift_dma_ptr mapping, uint32_t offset, uint32_t length, uint32_t direction, void* cookie);
+NELUA_CEXPORT int32_t drift_virtio_raw_kick(drift_virtio_ptr d, uint32_t index);
+typedef void** nlpointer_ptr;
+typedef uint32_t* nluint32_ptr;
+NELUA_CEXPORT int32_t drift_virtio_raw_get(drift_virtio_ptr d, uint32_t index, drift_virtio_raw_transfer_ptr t, nlpointer_ptr cookie, nluint32_ptr length);
 static bool drift_virtio_ready(drift_virtio_ptr d, uint32_t id);
 NELUA_CEXPORT int32_t drift_virtio_block(drift_virtio_ptr d, uint64_t sector, uint32_t count, nluint8_arr0_ptr data, int32_t write);
 NELUA_CEXPORT int32_t drift_virtio_flush(drift_virtio_ptr d);
@@ -213,6 +228,10 @@ int32_t drift_virtio_close(drift_virtio_ptr d) {
     return -2;
   }
   for(uint32_t i = 0U; i <= 1U; i += 1) {
+    if((d->queue[i].raw != ((drift_virtio_raw_transfer_ptr)NULL))) {
+      d->queue[i].raw->active = 0U;
+      d->queue[i].raw->owner = (void*)NULL;
+    }
     if((d->queue[i].buffer.data != ((nluint8_arr0_ptr)NULL))) {
       drift_hw_release(d->hw, (&d->queue[i].buffer));
     }
@@ -295,7 +314,10 @@ bool drift_virtio_queue_init(drift_virtio_ptr d, uint32_t index, uint32_t capaci
     }
     q->notify = (uint32_t)offset;
   }
-  if((((maximum < 8) || (!drift_virtio_allocate(d, (&q->ring), 4096U))) || (!drift_virtio_allocate(d, (&q->buffer), capacity)))) {
+  if(((maximum < 8) || (!drift_virtio_allocate(d, (&q->ring), 4096U)))) {
+    return false;
+  }
+  if(((capacity != 0) && (!drift_virtio_allocate(d, (&q->buffer), capacity)))) {
     return false;
   }
   q->capacity = capacity;
@@ -328,21 +350,30 @@ void drift_virtio_descriptor(drift_virtqueue_ptr q, uint32_t index, uint64_t add
   drift_virtio_put(q->ring.data, ((index * 16) + 12), (uint64_t)flags, 2U);
   drift_virtio_put(q->ring.data, ((index * 16) + 14), (uint64_t)next, 2U);
 }
-void drift_virtio_submit(drift_virtio_ptr d, uint32_t index) {
+void drift_virtio_publish(drift_virtio_ptr d, uint32_t index) {
   drift_virtqueue_ptr q = (&d->queue[index]);
   drift_virtio_put(q->ring.data, (132 + (((uint32_t)q->available & 7) * 2)), 0U, 2U);
   q->available = (q->available + 1);
-  drift_hw_sync(d->hw, (&q->buffer), 0U, q->capacity, 3U);
+  if((q->buffer.data != ((nluint8_arr0_ptr)NULL))) {
+    drift_hw_sync(d->hw, (&q->buffer), 0U, q->capacity, 3U);
+  }
   drift_hw_sync(d->hw, (&q->ring), 0U, 128U, 1U);
   drift_hw_sync(d->hw, (&q->ring), 132U, 16U, 1U);
   drift_virtio_put(q->ring.data, 130U, (uint64_t)q->available, 2U);
   drift_hw_sync(d->hw, (&q->ring), 128U, 20U, 1U);
   q->pending = 1U;
+}
+void drift_virtio_notify(drift_virtio_ptr d, uint32_t index) {
+  drift_virtqueue_ptr q = (&d->queue[index]);
   if((d->transport == 0)) {
     drift_hw_write(d->hw, d->region, 0x50U, 4U, (uint64_t)index);
   } else {
     drift_hw_write(d->hw, d->notify_region, q->notify, 2U, (uint64_t)index);
   }
+}
+void drift_virtio_submit(drift_virtio_ptr d, uint32_t index) {
+  drift_virtio_publish(d, index);
+  drift_virtio_notify(d, index);
 }
 int32_t drift_virtio_poll(drift_virtio_ptr d, uint32_t index, uint32_t maximum) {
   drift_virtqueue_ptr q = (&d->queue[index]);
@@ -363,7 +394,9 @@ int32_t drift_virtio_poll(drift_virtio_ptr d, uint32_t index, uint32_t maximum) 
   }
   q->used = used;
   q->pending = 0U;
-  drift_hw_sync(d->hw, (&q->buffer), 0U, q->capacity, 2U);
+  if((q->buffer.data != ((nluint8_arr0_ptr)NULL))) {
+    drift_hw_sync(d->hw, (&q->buffer), 0U, q->capacity, 2U);
+  }
   return (int32_t)length;
 }
 int32_t drift_virtio_finish(drift_virtio_ptr d, uint32_t index, uint32_t maximum) {
@@ -400,11 +433,15 @@ void drift_virtio_input_post(drift_virtio_ptr d, uint32_t index) {
     drift_hw_write(d->hw, d->notify_region, q->notify, 2U, 0U);
   }
 }
-int32_t drift_virtio_start(drift_virtio_ptr d) {
+int32_t drift_virtio_start(drift_virtio_ptr d, bool ready_now, uint32_t raw_queues) {
   for(uint32_t i = 0U; i <= 5U; i += 1) {
     d->mac[i] = 0U;
   }
-  if((((((d->device_id != 1) && (d->device_id != 2)) && (d->device_id != 3)) && (d->device_id != 4)) && (d->device_id != 18))) {
+  if(ready_now) {
+    if((((((d->device_id != 1) && (d->device_id != 2)) && (d->device_id != 3)) && (d->device_id != 4)) && (d->device_id != 18))) {
+      return drift_virtio_poison(d, -4);
+    }
+  } else if(((((d->device_id == 0) || (d->device_id > 63)) || (raw_queues == 0)) || (raw_queues > 2))) {
     return drift_virtio_poison(d, -4);
   }
   if((!drift_virtio_reset(d))) {
@@ -418,10 +455,10 @@ int32_t drift_virtio_start(drift_virtio_ptr d) {
   }
   uint32_t offered = drift_virtio_feature(d, 0U);
   d->features = 0U;
-  if((d->device_id == 1)) {
+  if((ready_now && (d->device_id == 1))) {
     d->features = (offered & 0x20);
   }
-  if((d->device_id == 2)) {
+  if((ready_now && (d->device_id == 2))) {
     d->features = (offered & 0x220);
   }
   drift_virtio_accept_feature(d, 0U, d->features);
@@ -429,6 +466,16 @@ int32_t drift_virtio_start(drift_virtio_ptr d) {
   drift_virtio_set_status(d, 11U);
   if(((drift_virtio_status(d) & 8) == 0)) {
     return drift_virtio_poison(d, -4);
+  }
+  if((!ready_now)) {
+    for(uint32_t i = 0U, _end = raw_queues; i < _end; i += 1) {
+      if((!drift_virtio_queue_init(d, i, 0U))) {
+        return drift_virtio_poison(d, -6);
+      }
+    }
+    d->capacity = (uint64_t)raw_queues;
+    d->state = 4U;
+    return 0;
   }
   uint32_t capacity = 4096U;
   if((d->device_id == 1)) {
@@ -480,7 +527,7 @@ int32_t drift_virtio_start(drift_virtio_ptr d) {
   }
   return 0;
 }
-int32_t drift_virtio_open_mmio(drift_virtio_ptr d, drift_hw_ptr h, uint32_t region, uint32_t id) {
+int32_t drift_virtio_open_mmio_mode(drift_virtio_ptr d, drift_hw_ptr h, uint32_t region, uint32_t id, bool ready_now, uint32_t queues) {
   if((((d == ((drift_virtio_ptr)NULL)) || (drift_hw_valid(h) == 0)) || (d->state != 0))) {
     return -1;
   }
@@ -493,9 +540,12 @@ int32_t drift_virtio_open_mmio(drift_virtio_ptr d, drift_hw_ptr h, uint32_t regi
   d->device_id = id;
   d->timeout_us = 1000000U;
   d->state = 1U;
-  return drift_virtio_start(d);
+  return drift_virtio_start(d, ready_now, queues);
 }
-int32_t drift_virtio_open_pci_bounded(drift_virtio_ptr d, drift_hw_ptr h, uint32_t common_region, uint32_t common_offset, uint32_t notify_region, uint32_t notify_offset, uint32_t multiplier, uint32_t device_region, uint32_t device_offset, uint32_t id, uint32_t notify_length) {
+int32_t drift_virtio_open_mmio(drift_virtio_ptr d, drift_hw_ptr h, uint32_t region, uint32_t id) {
+  return drift_virtio_open_mmio_mode(d, h, region, id, true, 0U);
+}
+int32_t drift_virtio_open_pci_bounded(drift_virtio_ptr d, drift_hw_ptr h, uint32_t common_region, uint32_t common_offset, uint32_t notify_region, uint32_t notify_offset, uint32_t multiplier, uint32_t device_region, uint32_t device_offset, uint32_t id, uint32_t notify_length, bool ready_now, uint32_t queues) {
   if(((((((((d == ((drift_virtio_ptr)NULL)) || (drift_hw_valid(h) == 0)) || (d->state != 0)) || (common_offset > 0xffffffc0LL)) || (device_offset > 0xfffffeffLL)) || ((common_offset & 3) != 0)) || ((notify_offset & 1) != 0)) || ((id == 2) && ((device_offset & 3) != 0)))) {
     return -1;
   }
@@ -512,10 +562,10 @@ int32_t drift_virtio_open_pci_bounded(drift_virtio_ptr d, drift_hw_ptr h, uint32
   d->device_id = id;
   d->timeout_us = 1000000U;
   d->state = 1U;
-  return drift_virtio_start(d);
+  return drift_virtio_start(d, ready_now, queues);
 }
 int32_t drift_virtio_open_pci(drift_virtio_ptr d, drift_hw_ptr h, uint32_t common_region, uint32_t common_offset, uint32_t notify_region, uint32_t notify_offset, uint32_t multiplier, uint32_t device_region, uint32_t device_offset, uint32_t id) {
-  return drift_virtio_open_pci_bounded(d, h, common_region, common_offset, notify_region, notify_offset, multiplier, device_region, device_offset, id, (0xffffffffULL - notify_offset));
+  return drift_virtio_open_pci_bounded(d, h, common_region, common_offset, notify_region, notify_offset, multiplier, device_region, device_offset, id, (0xffffffffULL - notify_offset), true, 0U);
 }
 bool drift_virtio_memory_bar(drift_pci_ptr p, uint32_t bdf, uint32_t index) {
   uint32_t i = 0U;
@@ -532,7 +582,7 @@ bool drift_virtio_memory_bar(drift_pci_ptr p, uint32_t bdf, uint32_t index) {
   }
   return false;
 }
-int32_t drift_virtio_open_function(drift_virtio_ptr d, drift_hw_ptr h, drift_pci_ptr p, uint32_t bdf, drift_virtio_bar_arr0_ptr bars) {
+int32_t drift_virtio_open_function_mode(drift_virtio_ptr d, drift_hw_ptr h, drift_pci_ptr p, uint32_t bdf, drift_virtio_bar_arr0_ptr bars, bool ready_now, uint32_t expected, uint32_t queues) {
   if(((((((d == ((drift_virtio_ptr)NULL)) || (d->state != 0)) || (drift_hw_valid(h) == 0)) || (drift_pci_valid(p) == 0)) || (bdf > 65535)) || (bars == ((drift_virtio_bar_arr0_ptr)NULL)))) {
     return -1;
   }
@@ -542,7 +592,11 @@ int32_t drift_virtio_open_function(drift_virtio_ptr d, drift_hw_ptr h, drift_pci
     return -4;
   }
   device_id = (device_id - 0x1040);
-  if((((((device_id != 1) && (device_id != 2)) && (device_id != 3)) && (device_id != 4)) && (device_id != 18))) {
+  if(ready_now) {
+    if((((((device_id != 1) && (device_id != 2)) && (device_id != 3)) && (device_id != 4)) && (device_id != 18))) {
+      return -4;
+    }
+  } else if((((device_id != expected) || (queues == 0)) || (queues > 2))) {
     return -4;
   }
   if((((drift_pci_read(p, bdf, 12U) >> 16) & 127) != 0)) {
@@ -610,7 +664,7 @@ int32_t drift_virtio_open_function(drift_virtio_ptr d, drift_hw_ptr h, drift_pci
           notify_length = span;
           multiplier = drift_pci_read(p, bdf, (at + 16));
         } else {
-          if((((device_bar != 0xffffffffLL) || ((device_id == 2) && ((span < 8) || ((offset & 3) != 0)))) || ((device_id == 1) && (span < 6)))) {
+          if((((device_bar != 0xffffffffLL) || ((ready_now && (device_id == 2)) && ((span < 8) || ((offset & 3) != 0)))) || ((ready_now && (device_id == 1)) && (span < 6)))) {
             return -5;
           }
           device_bar = bar;
@@ -620,14 +674,119 @@ int32_t drift_virtio_open_function(drift_virtio_ptr d, drift_hw_ptr h, drift_pci
     }
     at = ((head >> 8) & 255);
   }
-  if((((common_bar == 0xffffffffLL) || (notify_bar == 0xffffffffLL)) || (((device_id == 1) || (device_id == 2)) && (device_bar == 0xffffffffLL)))) {
+  if((((common_bar == 0xffffffffLL) || (notify_bar == 0xffffffffLL)) || ((ready_now && ((device_id == 1) || (device_id == 2))) && (device_bar == 0xffffffffLL)))) {
     return -4;
   }
   uint32_t device_region = 0U;
   if((device_bar != 0xffffffffLL)) {
     device_region = bars[device_bar].region;
   }
-  return drift_virtio_open_pci_bounded(d, h, bars[common_bar].region, common_offset, bars[notify_bar].region, notify_offset, multiplier, device_region, device_offset, device_id, notify_length);
+  return drift_virtio_open_pci_bounded(d, h, bars[common_bar].region, common_offset, bars[notify_bar].region, notify_offset, multiplier, device_region, device_offset, device_id, notify_length, ready_now, queues);
+}
+int32_t drift_virtio_open_function(drift_virtio_ptr d, drift_hw_ptr h, drift_pci_ptr p, uint32_t bdf, drift_virtio_bar_arr0_ptr bars) {
+  return drift_virtio_open_function_mode(d, h, p, bdf, bars, true, 0U, 0U);
+}
+int32_t drift_virtio_raw_open_mmio(drift_virtio_ptr d, drift_hw_ptr h, uint32_t region, uint32_t id, uint32_t queues) {
+  if(((((queues == 0) || (queues > 2)) || (id == 0)) || (id > 63))) {
+    return -1;
+  }
+  return drift_virtio_open_mmio_mode(d, h, region, id, false, queues);
+}
+int32_t drift_virtio_raw_open_pci(drift_virtio_ptr d, drift_hw_ptr h, uint32_t cr, uint32_t co, uint32_t nr, uint32_t no, uint32_t nm, uint32_t dr, uint32_t doff, uint32_t id, uint32_t queues) {
+  if(((((queues == 0) || (queues > 2)) || (id == 0)) || (id > 63))) {
+    return -1;
+  }
+  return drift_virtio_open_pci_bounded(d, h, cr, co, nr, no, nm, dr, doff, id, (0xffffffffULL - no), false, queues);
+}
+int32_t drift_virtio_raw_open_function(drift_virtio_ptr d, drift_hw_ptr h, drift_pci_ptr p, uint32_t bdf, drift_virtio_bar_arr0_ptr bars, uint32_t id, uint32_t queues) {
+  if(((((queues == 0) || (queues > 2)) || (id == 0)) || (id > 63))) {
+    return -1;
+  }
+  return drift_virtio_open_function_mode(d, h, p, bdf, bars, false, id, queues);
+}
+int32_t drift_virtio_raw_device_ready(drift_virtio_ptr d) {
+  if(((((d == ((drift_virtio_ptr)NULL)) || (d->state != 4)) || (d->capacity == 0)) || (d->capacity > 2))) {
+    return -1;
+  }
+  drift_virtio_set_status(d, 15U);
+  if(((drift_virtio_status(d) & 0xcf) != 15)) {
+    return drift_virtio_poison(d, -5);
+  }
+  d->state = 5U;
+  return 0;
+}
+bool drift_virtio_raw_queue(drift_virtio_ptr d, uint32_t index) {
+  return (((((d != ((drift_virtio_ptr)NULL)) && (d->state == 5)) && (d->capacity > 0)) && (d->capacity <= 2)) && (index < d->capacity));
+}
+int32_t drift_virtio_raw_add(drift_virtio_ptr d, uint32_t index, drift_virtio_raw_transfer_ptr t, drift_dma_ptr mapping, uint32_t offset, uint32_t length, uint32_t direction, void* cookie) {
+  if(((((((!drift_virtio_raw_queue(d, index)) || (t == ((drift_virtio_raw_transfer_ptr)NULL))) || (mapping == ((drift_dma_ptr)NULL))) || (cookie == (void*)NULL)) || (mapping->data == ((nluint8_arr0_ptr)NULL))) || ((direction != 1) && (direction != 2)))) {
+    return -1;
+  }
+  if((((((length == 0) || (offset > mapping->size)) || (length > (mapping->size - offset))) || (mapping->address > (0xffffffffffffffffULL - offset))) || ((mapping->address + offset) > (0xffffffffffffffffULL - length)))) {
+    return -3;
+  }
+  drift_virtqueue_ptr q = (&d->queue[index]);
+  if((((q->pending != 0) || (q->raw != ((drift_virtio_raw_transfer_ptr)NULL))) || (t->active != 0))) {
+    return -7;
+  }
+  t->mapping = (*mapping);
+  t->cookie = cookie;
+  t->owner = (void*)d;
+  t->queue = index;
+  t->offset = offset;
+  t->length = length;
+  t->direction = direction;
+  t->started_us = drift_hw_time(d->hw);
+  t->active = 1U;
+  q->raw = t;
+  drift_hw_sync(d->hw, (&t->mapping), offset, length, ((direction == 2) ? 3U : 1U));
+  drift_virtio_descriptor(q, 0U, (mapping->address + offset), length, ((direction == 2) ? 2U : 0U), 0U);
+  drift_virtio_publish(d, index);
+  return 0;
+}
+int32_t drift_virtio_raw_kick(drift_virtio_ptr d, uint32_t index) {
+  if((!drift_virtio_raw_queue(d, index))) {
+    return -1;
+  }
+  drift_virtio_raw_transfer_ptr t = d->queue[index].raw;
+  if((((((t == ((drift_virtio_raw_transfer_ptr)NULL)) || (t->active == 0)) || (t->owner != (void*)d)) || (t->queue != index)) || (d->queue[index].pending == 0))) {
+    return -1;
+  }
+  drift_virtio_notify(d, index);
+  return 0;
+}
+int32_t drift_virtio_raw_get(drift_virtio_ptr d, uint32_t index, drift_virtio_raw_transfer_ptr t, nlpointer_ptr cookie, nluint32_ptr length) {
+  if(((((!drift_virtio_raw_queue(d, index)) || (t == ((drift_virtio_raw_transfer_ptr)NULL))) || (cookie == (nlpointer_ptr)NULL)) || (length == (nluint32_ptr)NULL))) {
+    return -1;
+  }
+  (*cookie) = (void*)NULL;
+  (*length) = 0U;
+  drift_virtqueue_ptr q = (&d->queue[index]);
+  if(((q->raw == ((drift_virtio_raw_transfer_ptr)NULL)) && (t->active == 0))) {
+    return 0;
+  }
+  if((((((q->raw != t) || (t->active == 0)) || (t->owner != (void*)d)) || (t->queue != index)) || (q->pending == 0))) {
+    return -1;
+  }
+  int32_t result = drift_virtio_poll(d, index, ((t->direction == 2) ? t->length : 0U));
+  if((result == -7)) {
+    if(((drift_hw_time(d->hw) - t->started_us) >= d->timeout_us)) {
+      return drift_virtio_poison(d, -2);
+    }
+    return 0;
+  }
+  if((result < 0)) {
+    return result;
+  }
+  if((t->direction == 2)) {
+    drift_hw_sync(d->hw, (&t->mapping), t->offset, t->length, 2U);
+  }
+  (*cookie) = t->cookie;
+  (*length) = (uint32_t)result;
+  q->raw = ((drift_virtio_raw_transfer_ptr)NULL);
+  t->active = 0U;
+  t->owner = (void*)NULL;
+  return 1;
 }
 bool drift_virtio_ready(drift_virtio_ptr d, uint32_t id) {
   return (((d != ((drift_virtio_ptr)NULL)) && (d->state == 2)) && (d->device_id == id));

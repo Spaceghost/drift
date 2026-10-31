@@ -10,12 +10,16 @@ jobs:
       - run: make check sanitize native-sanitize freestanding size
       - run: make linux-check linux-sanitize
       - run: make windows-check windows-sanitize
+      - run: make linux-rng-check linux-rng-sanitize windows-rng-check windows-rng-sanitize
       - run: sudo apt-get update && sudo apt-get install -y qemu-system-x86
       - run: make qemu-check kernel-check
+      - name: Actual Virtio RNG source imports and paired device trials
+        run: python3 ports/linux/virtio-rng/run.py --qemu "$(command -v qemu-system-x86_64)" --work "$PWD/build/virtio-rng-proof" --requests 64 --rounds 4
       - run: sh tools/bootstrap.sh
       - run: make verify-generated NELUA="$PWD/.toolchain/nelua/nelua"
       - run: make linux-verify-generated NELUA="$PWD/.toolchain/nelua/nelua"
       - run: make windows-verify-generated NELUA="$PWD/.toolchain/nelua/nelua"
+      - run: make linux-rng-verify-generated windows-rng-verify-generated NELUA="$PWD/.toolchain/nelua/nelua"
       - run: |
           ASAN_OPTIONS=detect_leaks=0 make benchmark-check CFLAGS='-O1 -g -fsanitize=address,undefined'
           make linux-bench
@@ -29,6 +33,9 @@ jobs:
           path: |
             build/linux-import-benchmark.tsv
             build/compatibility-environment.txt
+            build/virtio-rng-proof/**/*.json
+            build/virtio-rng-proof/**/*.log
+            build/virtio-rng-proof/**/*.tsv
   windows-model:
     name: Windows native host model (not a kernel/device test)
     runs-on: windows-2025
@@ -39,6 +46,7 @@ jobs:
       - uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
+          path-type: inherit
           update: true
           install: >-
             make
@@ -49,6 +57,13 @@ jobs:
       - shell: msys2 {0}
         if: always()
         run: make windows-check CC=gcc
+      - shell: msys2 {0}
+        if: always()
+        run: make windows-rng-check CC=gcc
+      - name: Reject the unsupported Linux-source LLP64 ABI explicitly
+        shell: msys2 {0}
+        if: always()
+        run: python ports/windows/virtio-rng/check_llp64.py --cc gcc --work "$PWD/build/linux-rng-llp64"
       - shell: msys2 {0}
         if: always()
         run: |
@@ -65,3 +80,39 @@ jobs:
           path: |
             build/linux-import-benchmark.tsv
             build/compatibility-environment.txt
+            build/linux-rng-llp64/*.json
+            build/linux-rng-llp64/*.log
+  windows-rng:
+    name: Windows native PE Virtio RNG device shootout
+    runs-on: windows-2025
+    timeout-minutes: 20
+    env:
+      MSYS: winsymlinks:nativestrict
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          path-type: inherit
+          update: true
+          install: >-
+            make
+            diffutils
+            mingw-w64-i686-gcc
+      - name: Verify native PE compiler and privately extract pinned QEMU
+        id: rng-tools
+        shell: msys2 {0}
+        run: python ports/windows/virtio-rng/bootstrap.py --work "$PWD/build/windows-rng-tools"
+      - name: Native Nelua and unchanged Linux/Windows source trials
+        shell: msys2 {0}
+        run: python ports/linux/virtio-rng/run.py --work "$PWD/build/windows-rng-proof" --cc '${{ steps.rng-tools.outputs.cc }}' --qemu '${{ steps.rng-tools.outputs.qemu }}' --requests 64 --rounds 4
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-virtio-rng-device
+          path: |
+            build/windows-rng-tools/*.json
+            build/windows-rng-tools/*.log
+            build/windows-rng-proof/**/*.json
+            build/windows-rng-proof/**/*.log
+            build/windows-rng-proof/**/*.tsv

@@ -1,0 +1,38 @@
+if {![info exists drift_component]} { set drift_component resources }
+build [concat { core init lib/ld timer driver/platform } test/rng_$drift_component]
+create_boot_directory
+set config {
+<config>
+ <parent-provides>
+  <service name="LOG"/><service name="PD"/><service name="CPU"/><service name="ROM"/>
+  <service name="IO_PORT"/><service name="IO_MEM"/><service name="IRQ"/>
+ </parent-provides>
+ <default-route><any-service><parent/><any-child/></any-service></default-route>
+ <default caps="150"/>
+ <start name="timer"><resource name="RAM" quantum="2M"/><provides><service name="Timer"/></provides></start>
+ <start name="platform" managing_system="yes">
+  <resource name="RAM" quantum="12M"/>
+  <provides><service name="Platform"/><service name="Dma"/></provides>
+  <config><policy label_prefix="rng-resources ->" info="yes"><device name="00:03.0"/></policy></config>
+  <route><service name="ROM" label="devices"><parent label="rng_devices"/></service><any-service><parent/><any-child/></any-service></route>
+ </start>
+ <start name="rng-resources"><resource name="RAM" quantum="16M"/></start>
+</config>
+}
+set binary [string map {_ -} rng-$drift_component]
+regsub -all {rng-resources} $config $binary config
+if {[info exists drift_denied]} { regsub {<device name="00:03.0"/>} $config {} config }
+install_config $config
+set devices {
+<devices>
+ <device name="00:03.0" type="pci">
+  <io_mem pci_bar="1" address="0xfebf1000" size="0x1000"/>
+  <io_mem pci_bar="4" address="0xfe000000" size="0x4000"/>
+  <pci-config address="0xb0018000" bus="0" device="3" function="0" vendor_id="0x1af4" device_id="0x1044" class="0xff00" revision="1" sub_vendor_id="0x1af4" sub_device_id="0x1100"/>
+ </device>
+</devices>
+}
+set fd [open bin/rng_devices w]
+puts $fd $devices
+close $fd
+build_boot_image [concat [build_artifacts] rng_devices]
