@@ -6,6 +6,8 @@
 #include <inttypes.h>
 #include <limits.h>
 #include <poll.h>
+#include <signal.h>
+#include <sys/stat.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,6 +20,17 @@
 
 #define IMAGE_MAX (32u + 8u*DRIFT_CODE_MAX + DRIFT_MEMORY_MAX)
 #define STEP_MAX UINT64_C(10000000)
+#ifndef DRIFT_MODULE_DIR
+#define DRIFT_MODULE_DIR "/usr/local/share/drift"
+#endif
+
+static volatile sig_atomic_t stopping;
+
+static void stop_requested(int signal_number)
+{
+    (void)signal_number;
+    stopping=1;
+}
 
 typedef struct host {
     FILE *trace;
@@ -25,6 +38,9 @@ typedef struct host {
     unsigned line;
     int fd;
     uint32_t speed;
+    FILE *dump;
+    uint32_t total, written;
+    int flash, demo;
 } host;
 
 static int fail(const char *message)
@@ -130,7 +146,7 @@ static int stream(host *h, drift_vm *vm, uint8_t *rx,
     if (vm->effect.tx_len || !vm->effect.rx_len) return fail("stream host accepts reads only");
     do ready=poll(&p,1,5000); while (ready < 0 && errno==EINTR);
     if (ready <= 0) { *status=ready ? -errno : -ETIMEDOUT; *length=0; return 0; }
-    do n=read(h->fd,rx,vm->effect.rx_len); while (n < 0 && errno==EINTR);
+    do n=read(h->fd,rx,vm->effect.rx_len); while (n < 0 && errno==EINTR && !stopping);
     *status = n < 0 ? -errno : n == 0 ? -ENODEV : 0;
     *length = n > 0 ? (uint32_t)n : 0;
     return 0;
@@ -143,14 +159,18 @@ static int spi(host *h, drift_vm *vm, uint8_t *rx,
     struct spi_ioc_transfer message[2]={{0},{0}};
     uint32_t mode=0;
     int n;
-    /* A host capability is narrower than a bus. This first hardware adapter
-     * deliberately grants JEDEC identification, never flash writes/erases. */
-    if (vm->effect.tx_len != 1 || vm->effect.rx_len != 3 ||
-        vm->memory[vm->effect.tx] != 0x9f) return fail("SPI endpoint permits JEDEC identification only");
+    /* The endpoint permits only identification and bounded read commands.
+     * No write-enable, erase, status-register or mode-changing operations. */
+    const uint8_t *tx=vm->memory+vm->effect.tx;
+    if (!(vm->effect.tx_len == 1 && vm->effect.rx_len == 3 && tx[0] == 0x9f) &&
+        !(h->flash && h->total && vm->effect.tx_len == 4 &&
+          vm->effect.rx_len == 256 && tx[0] == 0x03 &&
+          ((uint32_t)tx[1]<<16 | (uint32_t)tx[2]<<8 | tx[3]) <= h->total-256))
+        return fail("SPI endpoint permits identification and bounded reads only");
     /* Inspect, never silently reconfigure. JEDEC read-ID accepts SPI modes 0
      * and 3, MSB first, active-low select. Reject all additional mode flags.
      * The caller must retain exclusive ownership of the endpoint/configuration. */
-    do n=ioctl(h->fd,SPI_IOC_RD_MODE32,&mode); while (n < 0 && errno==EINTR);
+    do n=ioctl(h->fd,SPI_IOC_RD_MODE32,&mode); while (n < 0 && errno==EINTR && !stopping);
     if (n < 0) { *status=-errno; *length=0; return 0; }
     if (mode != 0 && mode != (SPI_CPOL|SPI_CPHA))
         return fail("JEDEC host requires SPI mode 0 or 3, MSB first, active-low select");
@@ -161,14 +181,54 @@ static int spi(host *h, drift_vm *vm, uint8_t *rx,
     message[0].speed_hz=message[1].speed_hz=h->speed;
     message[0].bits_per_word=message[1].bits_per_word=8;
     /* One message keeps chip select asserted between the write and read. */
-    do n=ioctl(h->fd,SPI_IOC_MESSAGE(2),message); while (n < 0 && errno==EINTR);
-    *status=n < 0 ? -errno : n != 4 ? -EIO : 0;
-    *length=*status ? 0 : 3;
+    do n=ioctl(h->fd,SPI_IOC_MESSAGE(2),message); while (n < 0 && errno==EINTR && !stopping);
+    *status=n < 0 ? -errno : (uint32_t)n != vm->effect.tx_len+vm->effect.rx_len ? -EIO : 0;
+    *length=*status ? 0 : vm->effect.rx_len;
     return 0;
 #else
     (void)h; (void)vm; (void)rx; (void)length; (void)status;
     return fail("SPI host requires Linux spidev");
 #endif
+}
+
+/* Explicitly synthetic endpoint: a 64 KiB NOR with a deterministic image. */
+static int flash_demo(host *h, drift_vm *vm, uint8_t *rx,
+                      uint32_t *length, int32_t *status)
+{
+    const drift_effect *e=&vm->effect;
+    const uint8_t *tx=vm->memory+e->tx;
+    uint32_t address, i;
+    if (e->tx_len == 1 && e->rx_len == 3 && tx[0] == 0x9f) {
+        rx[0]=0xef; rx[1]=0x40; rx[2]=16; *length=3;
+    } else if (e->tx_len == 4 && e->rx_len == 256 && tx[0] == 0x03 && h->total) {
+        address=(uint32_t)tx[1]<<16 | (uint32_t)tx[2]<<8 | tx[3];
+        if (address > h->total-256) return fail("demo read outside flash");
+        for (i=0; i<256; ++i) rx[i]=(uint8_t)((address+i)^((address+i)>>8));
+        *length=256;
+    } else return fail("demo received an unsupported transaction");
+    *status=0;
+    return 0;
+}
+
+/* The host owns the sink; module events describe validated chunks in RAM. */
+static int flash_event(host *h, drift_vm *vm)
+{
+    const drift_effect *e=&vm->effect;
+    if (e->tag == 2) {
+        if (h->total || e->z < 16 || e->z > 24 || e->x == 0 || e->x >= 255 || e->y > 255)
+            return fail("invalid flash identification event");
+        h->total=UINT32_C(1)<<e->z;
+        fprintf(stderr,"JEDEC %02" PRIx32 " %02" PRIx32 " %02" PRIx32
+                       ": %" PRIu32 " bytes; reading each block twice\n",e->x,e->y,e->z,h->total);
+        return 0;
+    }
+    if (e->tag != 3 || !h->total || e->x != h->written || e->y != 256 ||
+        e->y > h->total-h->written || e->z > vm->memory_len || e->y > vm->memory_len-e->z)
+        return fail("invalid or out-of-order flash chunk");
+    if (fwrite(vm->memory+e->z,1,e->y,h->dump) != e->y || fflush(h->dump))
+        return fail("cannot write backup");
+    h->written+=e->y;
+    return 0;
 }
 
 static int load_image(const char *path, uint8_t *image, uint32_t *length)
@@ -197,15 +257,26 @@ static int drive(host *h, drift_vm *vm)
 {
     uint8_t rx[DRIFT_MEMORY_MAX];
     uint32_t waited=0;
+    uint64_t since_effect=vm->steps;
     for (;;) {
         uint32_t length=0;
         int32_t status=0, state;
         int stopped=0;
-        if (vm->steps >= STEP_MAX) return fail("instruction limit reached");
-        state=drift_run(vm,(uint32_t)((STEP_MAX-vm->steps) < 4096 ? STEP_MAX-vm->steps : 4096));
+        if (h->flash && stopping) return fail("backup interrupted");
+        uint64_t remaining=h->flash ? UINT64_C(65536)-(vm->steps-since_effect) : STEP_MAX-vm->steps;
+        if ((h->flash && vm->steps-since_effect >= 65536) || (!h->flash && vm->steps >= STEP_MAX))
+            return fail("instruction limit reached");
+        state=drift_run(vm,(uint32_t)(remaining < 4096 ? remaining : 4096));
         if (state == DRIFT_QUOTA) continue;
         if (state == DRIFT_DONE) {
             if (h->trace && finish_trace(h)) return -1;
+            if (h->flash) {
+                if (vm->r[0] || !h->total || h->written != h->total) {
+                    fprintf(stderr,"drift: backup rejected (driver result %" PRIu32 ", bytes %" PRIu32 ")\n",vm->r[0],h->written);
+                    return -1;
+                }
+                return 0;
+            }
             if (printf("done %" PRIu32 " steps=%" PRIu64 "\n",vm->r[0],vm->steps) < 0 ||
                 fflush(stdout) == EOF) return fail("cannot write stdout");
             return vm->r[0] ? 1 : 0;
@@ -216,20 +287,26 @@ static int drive(host *h, drift_vm *vm)
         }
         if (vm->effect.kind == DRIFT_XFER) {
             if (h->trace) stopped=replay(h,vm,rx,&length,&status);
+            else if (h->demo) stopped=flash_demo(h,vm,rx,&length,&status);
             else if (vm->bus==DRIFT_BUS_SPI) stopped=spi(h,vm,rx,&length,&status);
             else stopped=stream(h,vm,rx,&length,&status);
             if (stopped < 0) return -1;
             if (stopped) {
+                if (h->flash) return fail("backup trace stopped before completion");
                 if (finish_trace(h)) return -1;
                 if (printf("stopped steps=%" PRIu64 "\n",vm->steps) < 0 ||
                     fflush(stdout) == EOF) return fail("cannot write stdout");
                 return 0;
             }
         } else if (vm->effect.kind == DRIFT_EMIT) {
+            if (h->flash) {
+                if (flash_event(h,vm)) return -1;
+            } else {
             /* Delivery must succeed before we acknowledge this effect. */
             if (printf("event %" PRIu32 " %" PRIu32 " %" PRIu32 " %" PRIu32 "\n",
                        vm->effect.tag,vm->effect.x,vm->effect.y,vm->effect.z) < 0 ||
                 fflush(stdout) == EOF) return fail("cannot deliver event to stdout");
+            }
         } else if (vm->effect.kind == DRIFT_WAIT) {
             struct timespec delay;
             if (vm->effect.x > 60000-waited) return fail("wait budget exceeded (60000 ms total)");
@@ -244,7 +321,81 @@ static int drive(host *h, drift_vm *vm)
         } else return fail("unknown effect kind");
         state=drift_complete(vm,vm->effect.instance,vm->effect.ticket,status,rx,length);
         if (state != DRIFT_READY) return fail("completion rejected");
+        since_effect=vm->steps;
     }
+}
+
+/* Publish a complete backup without overwriting an existing path. Partial
+ * data stays in a private sibling file and is removed on handled failures. */
+static int backup(int argc, char **argv)
+{
+    uint8_t image[IMAGE_MAX];
+    uint32_t length=0;
+    drift_vm vm;
+    host h={0};
+    const char *output, *module=DRIFT_MODULE_DIR "/flash.drv";
+    char *temporary;
+    size_t capacity;
+    struct sigaction action;
+    struct stat existing;
+    int fd, result=-1;
+    h.fd=-1; h.speed=1000000; h.flash=1;
+    h.demo=!strcmp(argv[1],"flash-demo");
+    if ((h.demo && argc != 3) || (!h.demo && argc != 4 && argc != 5))
+        return fail("usage: drift flash DEVICE OUTPUT [HZ] | flash-replay TRACE OUTPUT | flash-demo OUTPUT");
+    if (argc == 5 && (!strcmp(argv[1],"flash-replay") || number(argv[4],&h.speed) || !h.speed || h.speed>50000000))
+        return fail("invalid SPI speed (1..50000000 Hz)");
+    output=argv[h.demo ? 2 : 3];
+    if (!lstat(output,&existing) || errno != ENOENT) return fail("output path must not exist");
+    memset(&action,0,sizeof(action));
+    action.sa_handler=stop_requested;
+    sigemptyset(&action.sa_mask);
+    if (sigaction(SIGINT,&action,NULL) || sigaction(SIGTERM,&action,NULL))
+        return fail("cannot install stop handler");
+    if (access(module,R_OK)) module="modules/flash.drv";
+    if (load_image(module,image,&length)) return -1;
+    if (drift_load(&vm,image,length,DRIFT_CAP_XFER|DRIFT_CAP_EMIT,1) != DRIFT_READY || vm.bus != DRIFT_BUS_SPI)
+        return fail("flash module rejected");
+    if (!h.demo) {
+        if (!strcmp(argv[1],"flash-replay")) {
+            h.name=argv[2]; h.trace=fopen(h.name,"r");
+            if (!h.trace) { perror(h.name); return -1; }
+        } else {
+            h.fd=open(argv[2],O_RDWR);
+            if (h.fd < 0) { perror(argv[2]); return -1; }
+        }
+    }
+    capacity=strlen(output)+sizeof(".part-XXXXXX");
+    temporary=malloc(capacity);
+    if (!temporary) { fail("cannot allocate output path"); goto close_input; }
+    snprintf(temporary,capacity,"%s.part-XXXXXX",output);
+    fd=mkstemp(temporary);
+    if (fd < 0) { perror(output); goto free_path; }
+    h.dump=fdopen(fd,"wb");
+    if (!h.dump) { close(fd); unlink(temporary); goto free_path; }
+    result=drive(&h,&vm);
+    if (!result && (fflush(h.dump) || fsync(fileno(h.dump)))) result=fail("cannot flush backup");
+    if (fclose(h.dump)) result=fail("cannot close backup");
+    if (h.trace) {
+        if (fclose(h.trace)) result=fail("cannot close trace");
+        h.trace=NULL;
+    }
+    if (h.fd >= 0) {
+        if (close(h.fd)) result=fail("cannot close endpoint");
+        h.fd=-1;
+    }
+    if (stopping) result=fail("backup interrupted");
+    if (!result && link(temporary,output)) { perror(output); result=-1; }
+    /* A successful link commits a complete image. A failed temporary-file
+     * cleanup cannot invalidate that image, so report it without undoing it. */
+    if (unlink(temporary)) perror(temporary);
+    if (!result) fprintf(stderr,"saved %" PRIu32 " verified bytes to %s%s\n",h.written,output,h.demo ? " (synthetic demo)" : "");
+free_path:
+    free(temporary);
+close_input:
+    if (h.trace && fclose(h.trace)) result=-1;
+    if (h.fd >= 0) close(h.fd);
+    return result;
 }
 
 int main(int argc, char **argv)
@@ -252,14 +403,20 @@ int main(int argc, char **argv)
     uint8_t image[IMAGE_MAX];
     uint32_t length=0;
     drift_vm vm;
-    host h={NULL,NULL,0,-1,1000000};
+    host h={0};
     int result;
+    h.fd=-1; h.speed=1000000;
+    if (argc >= 2 && (!strcmp(argv[1],"flash") || !strcmp(argv[1],"flash-replay") || !strcmp(argv[1],"flash-demo")))
+        return backup(argc,argv) ? 1 : 0;
     if (argc < 4 || argc > 5 ||
         (strcmp(argv[1],"replay") && strcmp(argv[1],"spi") && strcmp(argv[1],"stream")) ||
         (argc==5 && strcmp(argv[1],"spi"))) {
         fprintf(stderr,"usage: drift replay MODULE TRACE\n"
                        "       drift spi MODULE DEVICE [HZ]\n"
-                       "       drift stream MODULE PATH\n");
+                       "       drift stream MODULE PATH\n"
+                       "       drift flash DEVICE OUTPUT [HZ]\n"
+                       "       drift flash-replay TRACE OUTPUT\n"
+                       "       drift flash-demo OUTPUT\n");
         return 2;
     }
     if (load_image(argv[2],image,&length)) return 1;

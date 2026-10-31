@@ -124,6 +124,9 @@ acknowledged no earlier than the requested interval, except explicitly virtual
 time in replay. Instruction fuel does not bound wall time spent inside host I/O.
 Real hosts need their own deadlines and detach/cancellation policy.
 
+Device-class event contracts for the shipped modules are in
+[modules.md](modules.md), including the verified-flash block sink.
+
 ## Return values
 
 | Value | Meaning |

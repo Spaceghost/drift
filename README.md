@@ -1,64 +1,70 @@
 # Drift
 
-**A small machine for portable device drivers.**
+**Portable device drivers, with useful tools attached.**
 
-Write the device protocol once. Each operating system supplies the transport.
-The same `.drv` module handles the bytes, state and events.
+Back up an SPI flash chip. Inspect a USB keyboard. Record reports, replay bugs,
+and carry the same protocol modules into another operating system.
 
-[Walkthrough](docs/walkthrough.md) · [Porting](docs/porting.md) ·
-[ABI](docs/abi.md) · [MIT](LICENSE)
+[Use it](docs/using.md) · [Write a driver](docs/walkthrough.md) ·
+[Port it](docs/porting.md) · [ABI](docs/abi.md) · [MIT](LICENSE)
 
-## Run it
+## Try it
 
-You need a C11 compiler, Make and standard Unix tools. Generated C and driver
-modules are included; Nelua is only needed to change or build drivers.
+A C11 compiler, Make and standard Unix tools are enough. Generated C and
+assembled drivers are included.
 
 ```sh
 git clone https://github.com/Spaceghost/drift.git
 cd drift
-make check
-./build/drift replay modules/jedec.drv fixtures/jedec.trace
+make
+make demo
 ```
 
-```text
-event 2 239 64 24
-done 0 steps=22
-```
+The demo creates a **64 KiB flash image**, checking every block against a second
+read, then prints keyboard press/release events. Both inputs are synthetic;
+the portable drivers and file/event sinks are real.
 
-That's a flash chip's three-byte ID, decoded by a **233-byte driver**.
-The replay checks the outgoing command and supplies a synthetic device reply.
-No hardware required.
+## Back up a flash chip
 
-**[Follow the example →](docs/walkthrough.md)** Run it, inspect the protocol,
-break a reply, change the driver, then embed it in a small host.
-
-## Inside
-
-The runtime and assembler are written in **Nelua**. The core has 23 instructions,
-16 registers and three effects: **transfer, event, wait**. No heap, GC, libc or
-hidden threads. The host owns the device and the memory.
-
-| Included | Support |
-| --- | --- |
-| SPI flash | Read-only JEDEC identification · 233-byte module |
-| Boot keyboard | Key and modifier events, rollover handling · 576-byte module |
-| Hosts | Transaction replay, Linux SPI identification, packet input |
-| Embedding | Three-call C interface; freestanding example |
-
-Drift handles device protocols. Your OS still provides bus controllers and
-device discovery. The keyboard expects eight-byte boot reports. Physical
-hardware and a second OS port are the next milestones.
-
-## Build on it
+On Linux, with a configured SPI endpoint:
 
 ```sh
-make example       # run the small host from the walkthrough
-make sanitize      # address and undefined-behavior checks
-make freestanding  # run without libc on x86-64; link i386
-make size          # measure this build
+./build/drift flash /dev/spidev0.0 backup.bin
 ```
 
-Start with [the JEDEC driver](drivers/jedec.nelua) or
-[the embedding example](examples/identify.c).
-[Verification](docs/verification.md) records the tested limits and measurements;
-[the roadmap](docs/roadmap.md) lists the next work.
+The driver identifies the chip, reads each 256-byte block twice, compares every
+byte, and saves the complete image. A mismatch fails the backup. Existing files
+are never overwritten. Only identification and read commands are permitted.
+
+Supports standard three-byte-address SPI NOR, **64 KiB–16 MiB**, already in
+SPI mode 0/3 and three-byte address mode. [Compatibility and details](docs/using.md#flash-backups).
+
+## Inspect a keyboard
+
+```sh
+./build/drift-keyboard --list
+./build/drift-keyboard --device /dev/hidraw0 --record session.trace
+./build/drift-keyboard --replay session.trace
+```
+
+Choose a device listed as `ready`. The host validates its report descriptor;
+the Nelua driver handles key state, modifiers, duplicates and rollover.
+Ctrl-C stops cleanly. Captures are private and replayable without hardware.
+Events are HID usages; this is a diagnostic tool with no OS key injection.
+
+## Carry the drivers
+
+The VM and protocol modules are written in **Nelua**. Hosts supply transfers,
+event delivery and waits. The core has no heap, GC, libc or hidden threads.
+The verified flash driver is **569 bytes**; the keyboard driver is **576 bytes**.
+
+```sh
+make install PREFIX="$HOME/.local"  # binaries and modules
+make check                        # VM, protocols, descriptors and CLI failures
+make sanitize                     # ASan + UBSan, including the hosts
+```
+
+[Start with the guided example](docs/walkthrough.md), then use the
+[porting guide](docs/porting.md) to connect your OS's transport. Physical hardware
+qualification and a second OS port remain unverified;
+[verification](docs/verification.md) records what has actually been tested.

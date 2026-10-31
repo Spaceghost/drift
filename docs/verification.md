@@ -8,14 +8,17 @@ certification or a complete additional operating-system port.
 Linux x86-64; GCC 13.3.0; C11; `-Os` for release measurements. Nelua sources
 were compiled using the clean Spaceghost fork checkout at
 `3c29419776dfdca194fa7e9c572498264fe5c654`. `make verify-generated` compares the
-generated C and both assembled modules with freshly generated copies.
+generated C and all three assembled modules with freshly generated copies.
 
 ## Checks that passed
 
 | Check | Evidence |
 | --- | --- |
 | Independent VM tests | 87,213 assertions, including 30,000 deterministic generated/mutated modules |
-| Actual module execution | 22 protocol scenarios with exact transfer/event expectations |
+| Original module execution | 22 JEDEC/keyboard scenarios with exact transfer/event expectations |
+| Verified flash | 36 scenarios, 24,016,109 assertions; complete 64 KiB and 16 MiB reads; mismatch/short/error coverage |
+| HID descriptor proof | 123 assertions and 20,000 malformed input cases |
+| Complete tools | Keyboard capture/replay, held-key cleanup, private capture permissions; flash image byte comparison, no-clobber and partial-file cleanup |
 | Host CLI | Golden replay output; wrong command, short response, extra trace row, bus mismatch and failed stdout rejected |
 | ASan + UBSan | VM and protocol tests pass with no reported violations |
 | Release build | `-Wall -Wextra -Werror`; explicit checks remain enabled in generated code |
@@ -37,6 +40,9 @@ undefined symbols. The ELF object file includes metadata and is larger than
 that text section. A `drift_vm` occupies **12,448 bytes** on this 64-bit host,
 including the fixed-capacity code and memory arenas. A host effect occupies
 48 bytes. Use `make size` to measure your own build.
+
+The flash module is 67 instructions and 569 bytes, with 528 bytes of accessible
+guest RAM. It still occupies one fixed-capacity VM instance.
 
 The JEDEC module is 25 instructions and 233 bytes. The keyboard module is 68
 instructions and 576 bytes. A compact loop implementation reduced the keyboard

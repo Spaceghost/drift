@@ -2,6 +2,10 @@
 
 Keep the machine small by adding capabilities only for a demonstrated driver.
 
+Shipped: read-only flash backup with per-block double reads, a descriptor-checked
+Linux keyboard monitor, private capture/replay, and installable commands.
+These use the existing VM ABI; neither adds a core instruction.
+
 1. **Qualify the first physical endpoints.** JEDEC probe on a named SPI flash
    part, then boot-keyboard reports through an actual negotiated USB endpoint.
    Publish traces, disconnect tests and exact host versions.

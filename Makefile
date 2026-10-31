@@ -1,16 +1,27 @@
 CC ?= cc
 AR ?= ar
 NELUA ?= nelua
+PREFIX ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
+DATADIR ?= $(PREFIX)/share
 CFLAGS ?= -Os
-CPPFLAGS += -Iinclude
+CPPFLAGS += -Iinclude -DDRIFT_MODULE_DIR='"$(DATADIR)/drift"'
 WARN = -std=c11 -Wall -Wextra -Werror
 CORE = -ffreestanding -fno-builtin -fno-stack-protector
 
-.PHONY: all check example sanitize freestanding freestanding32 regen verify-generated clean size
-all: build/drift build/libdrift.a
+.PHONY: all check example demo install sanitize freestanding freestanding32 regen verify-generated clean size FORCE
+all: build/drift build/drift-keyboard build/libdrift.a
 
 build:
 	mkdir -p build
+
+# Rebuild the hosts if an install prefix changes after an earlier build.
+build/module-path: FORCE | build
+	@printf '%s\n' '$(DATADIR)/drift' > build/module-path.new
+	@if ! cmp -s build/module-path.new $@; then mv build/module-path.new $@; fi
+	@rm -f build/module-path.new
+
+FORCE:
 
 build/drift.o: generated/drift.c include/drift.h | build
 	$(CC) $(CPPFLAGS) $(WARN) $(CFLAGS) $(CORE) -c $< -o $@
@@ -18,8 +29,17 @@ build/drift.o: generated/drift.c include/drift.h | build
 build/libdrift.a: build/drift.o
 	$(AR) rcs $@ $<
 
-build/drift: hosts/posix.c build/drift.o include/drift.h
+build/drift: hosts/posix.c build/drift.o include/drift.h build/module-path
 	$(CC) $(CPPFLAGS) $(WARN) $(CFLAGS) $< build/drift.o -o $@
+
+build/drift-keyboard: hosts/keyboard.c hosts/hid_descriptor.c hosts/hid_descriptor.h build/drift.o include/drift.h build/module-path
+	$(CC) $(CPPFLAGS) $(WARN) $(CFLAGS) hosts/keyboard.c hosts/hid_descriptor.c build/drift.o -o $@
+
+build/test_flash: tests/test_flash.c build/drift.o include/drift.h
+	$(CC) $(CPPFLAGS) $(WARN) $(CFLAGS) $< build/drift.o -o $@
+
+build/test_hid_descriptor: tests/test_hid_descriptor.c hosts/hid_descriptor.c hosts/hid_descriptor.h | build
+	$(CC) $(CPPFLAGS) -Ihosts $(WARN) $(CFLAGS) tests/test_hid_descriptor.c hosts/hid_descriptor.c -o $@
 
 build/test_vm: tests/test_vm.c build/drift.o include/drift.h
 	$(CC) $(CPPFLAGS) $(WARN) $(CFLAGS) $< build/drift.o -o $@
@@ -33,21 +53,42 @@ build/identify: examples/identify.c build/drift.o include/drift.h
 example: build/identify
 	./build/identify modules/jedec.drv
 
-check: all build/test_vm build/test_drivers build/identify
+demo: all
+	@set -e; directory=$$(mktemp -d build/demo.XXXXXX); ./build/drift flash-demo "$$directory/flash.bin"
+	./build/drift-keyboard --replay fixtures/keyboard.trace
+
+install: all
+	install -d "$(DESTDIR)$(BINDIR)" "$(DESTDIR)$(DATADIR)/drift"
+	install -m 755 build/drift build/drift-keyboard "$(DESTDIR)$(BINDIR)/"
+	install -m 644 modules/*.drv "$(DESTDIR)$(DATADIR)/drift/"
+
+check: all build/test_vm build/test_drivers build/test_flash build/test_hid_descriptor build/identify
 	./build/test_vm
 	./build/test_drivers modules/jedec.drv modules/keyboard.drv
+	./build/test_flash modules/flash.drv
+	./build/test_hid_descriptor
 	sh tests/check-host.sh
+	sh tests/check-keyboard.sh
+	sh tests/check-flash.sh
 	$(CC) $(CPPFLAGS) $(WARN) $(CFLAGS) $(CORE) -c examples/embed.c -o build/embed.o
 	test -z "$$($(NM) -u build/drift.o)"
 
 NM ?= nm
-sanitize: | build
+sanitize: all
 	$(CC) $(CPPFLAGS) $(WARN) -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined generated/drift.c tests/test_vm.c -o build/test_vm_san
 	ASAN_OPTIONS=detect_leaks=0 ./build/test_vm_san
 	$(CC) $(CPPFLAGS) $(WARN) -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined generated/drift.c tests/test_drivers.c -o build/test_drivers_san
 	ASAN_OPTIONS=detect_leaks=0 ./build/test_drivers_san modules/jedec.drv modules/keyboard.drv
 	$(CC) $(CPPFLAGS) $(WARN) -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined generated/drift.c examples/identify.c -o build/identify_san
 	ASAN_OPTIONS=detect_leaks=0 ./build/identify_san modules/jedec.drv
+	$(CC) $(CPPFLAGS) $(WARN) -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined generated/drift.c tests/test_flash.c -o build/test_flash_san
+	ASAN_OPTIONS=detect_leaks=0 ./build/test_flash_san modules/flash.drv
+	$(CC) $(CPPFLAGS) -Ihosts $(WARN) -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined hosts/hid_descriptor.c tests/test_hid_descriptor.c -o build/test_hid_san
+	ASAN_OPTIONS=detect_leaks=0 ./build/test_hid_san
+	$(CC) $(CPPFLAGS) $(WARN) -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined generated/drift.c hosts/keyboard.c hosts/hid_descriptor.c -o build/keyboard_san
+	ASAN_OPTIONS=detect_leaks=0 DRIFT_KEYBOARD=./build/keyboard_san sh tests/check-keyboard.sh
+	$(CC) $(CPPFLAGS) $(WARN) -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined generated/drift.c hosts/posix.c -o build/drift_san
+	ASAN_OPTIONS=detect_leaks=0 DRIFT=./build/drift_san sh tests/check-flash.sh
 
 # No libc, startup object, allocator or kernel driver in this executable.
 # x86 Linux is used only to exit and report the test result.
@@ -68,6 +109,8 @@ regen: | build
 	./build/jedec-asm modules/jedec.drv
 	$(NELUA) -r -b -L lib -o build/keyboard-asm drivers/keyboard.nelua
 	./build/keyboard-asm modules/keyboard.drv
+	$(NELUA) -r -b -L lib -o build/flash-asm drivers/flash.nelua
+	./build/flash-asm modules/flash.drv
 
 verify-generated: | build
 	$(NELUA) -r --print-code --cflags=-Iinclude src/drift.nelua > build/verified.c
@@ -78,6 +121,9 @@ verify-generated: | build
 	$(NELUA) -r -b -L lib -o build/keyboard-asm drivers/keyboard.nelua
 	./build/keyboard-asm build/verified-keyboard.drv
 	cmp modules/keyboard.drv build/verified-keyboard.drv
+	$(NELUA) -r -b -L lib -o build/flash-asm drivers/flash.nelua
+	./build/flash-asm build/verified-flash.drv
+	cmp modules/flash.drv build/verified-flash.drv
 
 size: all
 	size build/drift.o build/drift

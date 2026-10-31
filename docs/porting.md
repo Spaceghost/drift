@@ -81,8 +81,10 @@ With an exclusively owned, already configured spidev endpoint:
 ./build/drift spi modules/jedec.drv /dev/spidev0.0 1000000
 ```
 
-The reference adapter checks SPI mode 0/3, holds chip select across command and
-response, and permits only the read-only JEDEC identification transaction. It
+The identification adapter checks SPI mode 0/3, holds chip select across command
+and response, and permits only the read-only JEDEC identification transaction.
+The complete `drift flash` command additionally permits bounded `03` reads; see
+[using Drift](using.md) and [its event contract](modules.md). It
 does not change driver bindings, device configuration or permissions. Choose
 the actual device path and a speed supported by your board and chip.
 
@@ -92,6 +94,9 @@ boot-keyboard reports:
 ```sh
 ./build/drift stream modules/keyboard.drv PATH
 ```
+
+For descriptor validation, discovery and captures, use the complete
+`drift-keyboard` tool in [using Drift](using.md#keyboard-inspection-and-capture).
 
 An arbitrary hidraw endpoint need not have that format. This adapter does not
 discover descriptors or negotiate boot mode. The OS port must release held

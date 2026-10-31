@@ -1,0 +1,92 @@
+-- Read-only 24-bit SPI NOR backup. SPDX-License-Identifier: MIT
+-- Host contract: tag 2 = JEDEC ID; tag 3 = offset, length, guest buffer.
+-- Requires standard SPI mode and an idle chip already using 3-byte addresses.
+local asm = require 'drift.asm'
+require 'C.arg'
+local b = asm.new(528, asm.XFER | asm.EMIT, asm.SPI)
+b:set(0, 0x9f)
+
+-- Identify before selecting a size. 16..24 encode 64 KiB through 16 MiB.
+b:lit(2, 0)                         -- command offset and constant zero
+b:lit(3, 1)                         -- command length
+b:lit(4, 16)                        -- reply buffer
+b:lit(5, 3)                         -- JEDEC reply length
+b:ins(asm.IO, 2, 3, 4, 5)
+b:branch(asm.JNE, 0, 2, 'done')
+b:branch(asm.JNE, 1, 5, 'short')
+b:ins(asm.LD8, 6, 4, 0, 0)          -- manufacturer
+b:ins(asm.LD8, 7, 4, 0, 1)          -- memory type
+b:ins(asm.LD8, 8, 4, 0, 2)          -- capacity code
+b:branch(asm.JEQ, 6, 2, 'invalid')
+b:lit(15, 255)
+b:branch(asm.JEQ, 6, 15, 'invalid')
+b:lit(15, 16)
+b:branch(asm.JLT, 8, 15, 'unsupported')
+b:lit(15, 25)
+b:branch(asm.JLT, 8, 15, 'capacity')
+b:branch(asm.JMP, 0, 0, 'unsupported')
+b:mark('capacity')
+b:lit(9, 1)
+b:ins(asm.SHL, 9, 9, 8, 0)          -- total bytes = 1 << capacity code
+b:ins(asm.EVENT, 6, 7, 8, 2)
+b:branch(asm.JNE, 0, 2, 'done')
+
+-- READ(03h) followed by a big-endian 24-bit byte address; no dummy clocks.
+b:lit(6, 3)
+b:ins(asm.ST8, 6, 2, 0, 0)
+b:lit(3, 4)
+b:lit(5, 256)
+b:lit(10, 0)                        -- flash offset
+b:lit(12, 16)
+b:lit(13, 8)
+b:mark('read')
+b:ins(asm.SHR, 6, 10, 12, 0)
+b:ins(asm.ST8, 6, 2, 0, 1)
+b:ins(asm.SHR, 6, 10, 13, 0)
+b:ins(asm.ST8, 6, 2, 0, 2)
+b:ins(asm.ST8, 10, 2, 0, 3)
+b:ins(asm.IO, 2, 3, 4, 5)
+b:branch(asm.JNE, 0, 2, 'done')
+b:branch(asm.JNE, 1, 5, 'short')
+b:lit(4, 272)                       -- second read uses a distinct buffer
+b:ins(asm.IO, 2, 3, 4, 5)
+b:branch(asm.JNE, 0, 2, 'done')
+b:branch(asm.JNE, 1, 5, 'short')
+
+-- Compare every byte before exposing a verified chunk. LD32 compares four
+-- bytes at once without assuming native alignment or host byte order.
+b:lit(6, 16)
+b:lit(7, 272)
+b:lit(8, 4)
+b:lit(11, 0)
+b:mark('verify')
+b:ins(asm.LD32, 14, 6, 0, 0)
+b:ins(asm.LD32, 15, 7, 0, 0)
+b:branch(asm.JNE, 14, 15, 'mismatch')
+b:ins(asm.ADD, 6, 6, 8, 0)
+b:ins(asm.ADD, 7, 7, 8, 0)
+b:ins(asm.ADD, 11, 11, 8, 0)
+b:branch(asm.JLT, 11, 5, 'verify')
+b:lit(4, 16)
+b:ins(asm.EVENT, 10, 5, 4, 3)        -- offset, byte count, guest buffer
+b:branch(asm.JNE, 0, 2, 'done')
+b:ins(asm.ADD, 10, 10, 5, 0)
+b:branch(asm.JLT, 10, 9, 'read')
+b:lit(0, 0)
+b:branch(asm.JMP, 0, 0, 'done')
+b:mark('short')
+b:lit(0, 1)
+b:branch(asm.JMP, 0, 0, 'done')
+b:mark('invalid')
+b:lit(0, 2)
+b:branch(asm.JMP, 0, 0, 'done')
+b:mark('unsupported')
+b:lit(0, 3)
+b:branch(asm.JMP, 0, 0, 'done')
+b:mark('mismatch')
+b:lit(0, 4)
+b:mark('done')
+b:ins(asm.HALT, 0, 0, 0, 0)
+
+if C.argc ~= 2 then error('usage: flash OUTPUT.drv') end
+b:write(C.argv[1])
