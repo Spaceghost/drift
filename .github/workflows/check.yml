@@ -17,6 +17,8 @@ jobs:
   windows-model:
     name: Windows native host model (not a kernel/device test)
     runs-on: windows-2025
+    env:
+      MSYS: winsymlinks:nativestrict
     steps:
       - uses: actions/checkout@v4
       - uses: msys2/setup-msys2@v2

@@ -5,7 +5,9 @@ cd "$(dirname "$0")/.."
 root=$PWD
 mkdir -p build
 temporary=$(mktemp -d "$root/build/check-linux-import.XXXXXX")
-trap 'rm -rf "$temporary"' EXIT HUP INT TERM
+trap 'task_import_status=$?; if [ "$task_import_status" -ne 0 ] && [ -f "$temporary/log" ]; then cat "$temporary/log" >&2; fi; rm -rf "$temporary"; exit "$task_import_status"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' HUP TERM
 mkdir -p "$temporary/tools" "$temporary/bin" "$temporary/imports/linux/pcspkr"
 cp tools/import-linux.sh "$temporary/tools/"
 cp imports/linux/pcspkr/SOURCE imports/linux/pcspkr/SHA256SUMS "$temporary/imports/linux/pcspkr/"
