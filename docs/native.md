@@ -5,6 +5,24 @@ links into a kernel or userspace driver server through `libdrift-native.a`.
 The bytecode interpreter remains useful for small device protocols; native
 controllers share its preference for explicit ownership and bounded operations.
 
+## Nelua without its runtime
+
+Every native driver uses `nogc`, `noentrypoint` and explicit validation with
+`nochecks`, matching the C-host pattern used by the multicore-server challenge.
+No executable module initialization is required before calling these exports.
+The host supplies storage, DMA allocation and platform callbacks; those explicit
+resources do not introduce a Nelua GC or allocator. Drift's own protocol-bytecode
+VM is separate from a Nelua runtime.
+
+`make native-check` combines the native objects and requires `nm -u` to be empty;
+`make kernel-check` links and boots them without libc. `nocstaticassert` in these
+fixed-width modules is a separate cross-target generation choice, not a runtime
+switch. Static C ABI assertions normally have no runtime cost.
+
+See the compiler fork's [runtime-free guide](https://github.com/Spaceghost/nelua-lang/blob/master/docs/pages/runtime-free.md)
+for exact pragma meanings, initialization rules, audited C-host and no-libc
+examples, and checks to repeat for each C compiler/target.
+
 ## One block and network interface
 
 After controller initialization, bind it through `drift_io.h`. The same
