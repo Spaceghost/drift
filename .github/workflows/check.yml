@@ -16,6 +16,19 @@ jobs:
       - run: make verify-generated NELUA="$PWD/.toolchain/nelua/nelua"
       - run: make linux-verify-generated NELUA="$PWD/.toolchain/nelua/nelua"
       - run: make windows-verify-generated NELUA="$PWD/.toolchain/nelua/nelua"
+      - run: |
+          ASAN_OPTIONS=detect_leaks=0 make benchmark-check CFLAGS='-O1 -g -fsanitize=address,undefined'
+          make linux-bench
+          uname -a > build/compatibility-environment.txt
+          cc --version >> build/compatibility-environment.txt
+          printf '%s\n' 'CFLAGS=-Os; component-model-no-hardware' >> build/compatibility-environment.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-source-component-model
+          path: |
+            build/linux-import-benchmark.tsv
+            build/compatibility-environment.txt
   windows-model:
     name: Windows native host model (not a kernel/device test)
     runs-on: windows-2025
@@ -36,3 +49,19 @@ jobs:
       - shell: msys2 {0}
         if: always()
         run: make windows-check CC=gcc
+      - shell: msys2 {0}
+        if: always()
+        run: |
+          make linux-bench CC=gcc
+          uname -a > build/compatibility-environment.txt
+          gcc --version >> build/compatibility-environment.txt
+          gcc -dumpmachine >> build/compatibility-environment.txt
+          objdump -f build/bench-linux-import.exe >> build/compatibility-environment.txt
+          printf '%s\n' 'CFLAGS=-Os; component-model-no-hardware' >> build/compatibility-environment.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-source-component-model
+          path: |
+            build/linux-import-benchmark.tsv
+            build/compatibility-environment.txt

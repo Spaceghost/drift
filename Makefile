@@ -15,7 +15,7 @@ NATIVE_OBJECTS = $(addprefix build/native-,$(addsuffix .o,$(NATIVE)))
 NATIVE_TESTS = $(addprefix build/test_,$(NATIVE))
 PUBLIC_HEADERS = include/drift.h include/drift_hw.h $(addprefix include/drift_,$(addsuffix .h,$(NATIVE)))
 
-.PHONY: all check example demo install sanitize freestanding freestanding32 regen verify-generated clean size FORCE native-check native-sanitize native-regen qemu-check kernel-check linux-check linux-sanitize linux-regen linux-verify-generated windows-check windows-sanitize windows-regen windows-verify-generated
+.PHONY: all check example demo install sanitize freestanding freestanding32 regen verify-generated clean size FORCE native-check native-sanitize native-regen qemu-check kernel-check linux-check linux-sanitize linux-regen linux-verify-generated windows-check windows-sanitize windows-regen windows-verify-generated linux-bench benchmark-check
 all: build/drift build/drift-keyboard build/libdrift.a build/libdrift-native.a
 
 build:
@@ -90,6 +90,19 @@ windows-regen:
 
 windows-verify-generated:
 	$(MAKE) -C imports/windows/moufiltr verify-generated NELUA="$(NELUA)"
+
+# Component-model diagnostic, never hardware or native-kernel performance.
+# Build both paths together with identical flags; don't reuse a differently
+# optimized cached library for one side of the comparison.
+benchmark-check: | build
+	$(CC) $(WARN) -Wno-unused-parameter $(CFLAGS) $(CORE) -fno-strict-aliasing -DDRIFT_LINUX_IMPORT_BENCH_NO_MAIN -Iimports/linux/pcspkr -Iimports/linux/pcspkr/compat -Itests tests/test_bench_linux_import.c tests/bench_linux_import.c imports/linux/pcspkr/compat.generated.c imports/linux/pcspkr/driver.c -o build/test-import-benchmark
+	./build/test-import-benchmark
+
+linux-bench: benchmark-check | build
+	$(MAKE) -C imports/linux/pcspkr source-check
+	$(CC) $(WARN) -Wno-unused-parameter $(CFLAGS) $(CORE) -fno-strict-aliasing -Iimports/linux/pcspkr -Iimports/linux/pcspkr/compat -Itests tests/bench_linux_import.c imports/linux/pcspkr/compat.generated.c imports/linux/pcspkr/driver.c -o build/bench-linux-import
+	./build/bench-linux-import > build/linux-import-benchmark.tsv
+	cat build/linux-import-benchmark.tsv
 
 build/drift: hosts/posix.c build/drift.o include/drift.h build/module-path
 	$(CC) $(CPPFLAGS) $(WARN) $(CFLAGS) $< build/drift.o -o $@
