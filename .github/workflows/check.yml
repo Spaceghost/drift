@@ -4,7 +4,7 @@ permissions:
   contents: read
 jobs:
   machine:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, bak]
     steps:
       - uses: actions/checkout@v4
       - run: make check sanitize native-sanitize freestanding size
